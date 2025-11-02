@@ -108,12 +108,18 @@ fi
 run_check() {
   FILE="$1"
   DESC="$2"
+
   if [ -f "$FILE" ]; then
     log "▶ Проверка: $DESC"
+
+    # Загружаем .env в окружение перед запуском
+    export $(grep -v '^#' .env | xargs)
+
     python3 "$FILE" >>"$LOG_FILE" 2>&1 || {
       log "❌ $DESC — ошибка (см. лог)"
       fail_if_error
     }
+
     if grep -q "❌" "$LOG_FILE" || grep -q "⚠️" "$LOG_FILE"; then
       log "❌ $DESC — провалено"
       fail_if_error
@@ -124,6 +130,7 @@ run_check() {
     log "⚠️ Файл $FILE не найден, пропускаем"
   fi
 }
+
 
 run_check "tests/check_db.py" "Проверка базы данных"
 run_check "tests/check_bot.py" "Проверка токена бота"
