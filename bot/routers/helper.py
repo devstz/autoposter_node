@@ -24,6 +24,7 @@ async def edit_message(
     ):
     if isinstance(event, CallbackQuery):
         message = event.message
+        await event.answer()
     elif isinstance(event, Message):
         message = event
     else:

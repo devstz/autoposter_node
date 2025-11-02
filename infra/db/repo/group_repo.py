@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from logging import getLogger
-from typing import Optional
+from datetime import datetime
+from dataclasses import dataclass
+from typing import Optional, Tuple
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +12,13 @@ from sqlalchemy.future import select
 from infra.db.models import Group
 
 logger = getLogger(__name__)
+
+
+@dataclass(slots=True)
+class AssignToBotResult:
+    newly_assigned: list[Group]
+    already_assigned: list[Group]
+    reassigned: list[Tuple[Group, UUID]]
 
 
 class SQLAlchemyGroupRepository:
@@ -60,3 +69,104 @@ class SQLAlchemyGroupRepository:
         stmt = select(func.count()).select_from(Group)
         res = await self.__session.execute(stmt)
         return int(res.scalar_one())
+
+    async def list_by_bot(self, bot_id: UUID, *, limit: int = 500, offset: int = 0) -> list[Group]:
+        stmt = (
+            select(Group)
+            .where(Group.assigned_bot_id == bot_id)
+            .order_by(Group.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        res = await self.__session.execute(stmt)
+        return list(res.scalars().all())
+
+    async def list_bound(self, *, limit: int = 1000, offset: int = 0) -> list[Group]:
+        stmt = (
+            select(Group)
+            .where(Group.assigned_bot_id.is_not(None))
+            .order_by(Group.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        res = await self.__session.execute(stmt)
+        return list(res.scalars().all())
+
+    async def count_bound(self) -> int:
+        from sqlalchemy import func
+
+        stmt = select(func.count()).select_from(Group).where(Group.assigned_bot_id.is_not(None))
+        res = await self.__session.execute(stmt)
+        return int(res.scalar_one())
+
+    async def assign_to_bot(self, *, bot_id: UUID, tg_chat_ids: list[int]) -> AssignToBotResult:
+        # Upsert-like: create Group entries if missing, set assigned_bot_id
+        newly_assigned: list[Group] = []
+        already_assigned: list[Group] = []
+        reassigned: list[Tuple[Group, UUID]] = []
+
+        seen: set[int] = set()
+        for chat_id in tg_chat_ids:
+            if chat_id in seen:
+                continue
+            seen.add(chat_id)
+
+            group = await self.get_by_tg_chat_id(chat_id)
+            if not group:
+                # type unknown at this point; default to 'supergroup'
+                group = Group(tg_chat_id=chat_id, type="supergroup")
+                self.__session.add(group)
+                group.assigned_bot_id = bot_id
+                newly_assigned.append(group)
+                continue
+
+            previous_bot_id = group.assigned_bot_id
+            if previous_bot_id == bot_id:
+                already_assigned.append(group)
+                continue
+
+            group.assigned_bot_id = bot_id
+            if previous_bot_id is None:
+                newly_assigned.append(group)
+            else:
+                reassigned.append((group, previous_bot_id))
+
+        await self.__session.flush()
+        return AssignToBotResult(
+            newly_assigned=newly_assigned,
+            already_assigned=already_assigned,
+            reassigned=reassigned,
+        )
+
+    async def unassign_from_bot(self, *, bot_id: UUID, tg_chat_ids: list[int] | None = None) -> int:
+        # Clears assigned_bot_id for provided groups or all groups of the bot
+        q = select(Group)
+        q = q.where(Group.assigned_bot_id == bot_id)
+        if tg_chat_ids:
+            q = q.where(Group.tg_chat_id.in_(tg_chat_ids))
+        res = await self.__session.execute(q)
+        groups = list(res.scalars().all())
+        for g in groups:
+            g.assigned_bot_id = None
+        await self.__session.flush()
+        return len(groups)
+
+    async def update_metadata(
+        self,
+        group_id: UUID,
+        *,
+        title: str | None = None,
+        username: str | None = None,
+        refreshed_at: datetime | None = None,
+    ) -> Optional[Group]:
+        group = await self.get(group_id)
+        if group is None:
+            return None
+        if title is not None and title:
+            group.title = title
+        if username is not None and username:
+            group.username = username
+        if refreshed_at is not None:
+            group.metadata_refreshed_at = refreshed_at
+        await self.__session.flush()
+        return group

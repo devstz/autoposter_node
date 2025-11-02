@@ -19,7 +19,7 @@ class SQLAlchemyPostAttemptRepository:
         self.__session.add(attempt)
         await self.__session.flush()
         return attempt
-
+    
     async def count_success_in_period(self, *, bot_id: Optional[UUID], seconds: int) -> int:
         since = datetime.now(timezone.utc) - timedelta(seconds=seconds)
         stmt = select(func.count()).select_from(PostAttempt).where(

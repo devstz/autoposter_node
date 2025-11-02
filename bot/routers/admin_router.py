@@ -1,0 +1,1341 @@
+from __future__ import annotations
+
+import math
+import base64
+from datetime import datetime
+from logging import getLogger
+from uuid import UUID
+
+from aiogram import F
+from aiogram.enums.chat_type import ChatType
+from aiogram.filters import CommandStart, Command
+from aiogram.types import CallbackQuery, Message
+from aiogram.fsm.context import FSMContext
+
+from bot.middlewares.admin import connect_admin_middlewares
+from bot.routers.base import BaseRouter
+from bot.ux import UXContext
+from bot.keyboards.inline import AdminInlineKeyboards
+from bot.keyboards.callback_data import (
+AdminMenuCallback,
+AdminBotsListCallback,
+AdminBotActionCallback,
+AdminGroupsCallback,
+AdminGroupsBindCallback,
+AdminDistributionsCallback,
+)
+from common.enums import (
+AdminMenuAction,
+AdminBotsListAction,
+AdminBotAction,
+AdminBotFreeMode,
+AdminGroupsAction,
+AdminDistributionsAction,
+)
+from common.dto import BotDTO
+from .helper import edit_message
+from bot.states.admin.admin_states import AdminStates
+from services import BotService, GroupService, PostService
+
+logger = getLogger(__name__)
+
+class AdminRouter(BaseRouter):
+    chat_types = ChatType.PRIVATE
+    def setup_middlewares(self):
+        connect_admin_middlewares(self)
+
+    def setup_handlers(self):
+        # ==========================
+        # /help и старт
+        # ==========================
+        @self.message(Command("help"))
+        async def help_command(message: Message, ux: UXContext):
+            start_text = await ux.admin.get_start_text()
+            await message.answer(start_text)
+
+        @self.message(CommandStart())
+        async def admin_panel(message: Message, ux: UXContext):
+            menu_view = await ux.admin.show_main_menu()
+            keyboard = AdminInlineKeyboards.build_admin_menu_keyboard(menu_view)
+            await edit_message(message, menu_view.text, reply_markup=keyboard)
+
+        # ==========================
+        # Главное меню
+        # ==========================
+        @self.callback_query(AdminMenuCallback.filter(F.action == AdminMenuAction.BOTS))
+        async def menu_bots(callback: CallbackQuery, ux: UXContext, state: FSMContext):
+            await state.clear()
+            await self._render_bots_list(callback, ux, page=1)
+
+        @self.callback_query(AdminMenuCallback.filter(F.action == AdminMenuAction.GROUPS))
+        async def menu_groups(callback: CallbackQuery, ux: UXContext, state: FSMContext):
+            await state.clear()
+            text = ux.admin.groups_menu_text()
+            keyboard = AdminInlineKeyboards.build_admin_groups_menu_keyboard()
+            await edit_message(callback, text, reply_markup=keyboard)
+
+        @self.callback_query(AdminMenuCallback.filter(F.action == AdminMenuAction.DISTRIBUTIONS))
+        async def menu_distributions(callback: CallbackQuery, ux: UXContext, state: FSMContext):
+            await state.clear()
+            await self._render_distributions_menu(callback, ux)
+
+        @self.callback_query(AdminMenuCallback.filter())
+        async def menu_placeholder(callback: CallbackQuery, callback_data: AdminMenuCallback, ux: UXContext, state: FSMContext):
+            # всё остальное, что сейчас плейсхолдер
+            await state.clear()
+            placeholder_text = await ux.admin.placeholder(callback_data.action)
+            keyboard = AdminInlineKeyboards.build_admin_placeholder_keyboard()
+            await edit_message(callback, placeholder_text, reply_markup=keyboard)
+
+        # ==========================
+        # Список ботов
+        # ==========================
+        @self.callback_query(AdminBotsListCallback.filter())
+        async def handle_bots_list(callback: CallbackQuery, callback_data: AdminBotsListCallback, ux: UXContext):
+            action = callback_data.action
+            page = callback_data.page or 1
+
+            if action in (AdminBotsListAction.OPEN, AdminBotsListAction.PAGE):
+                await self._render_bots_list(callback, ux, page=page)
+                return
+
+            if action == AdminBotsListAction.VIEW and callback_data.bot_id:
+                bot_uuid = await ux.admin.resolve_bot_uuid(callback_data.bot_id)
+                if bot_uuid is None:
+                    await callback.answer("Бот не найден", show_alert=True)
+                    return
+                await self._render_bot_card(callback, ux, bot_uuid, page)
+                return
+
+            if action == AdminBotsListAction.BACK:
+                menu_view = await ux.admin.show_main_menu()
+                keyboard = AdminInlineKeyboards.build_admin_menu_keyboard(menu_view)
+                await edit_message(callback, menu_view.text, reply_markup=keyboard)
+                return
+
+        # ==========================
+        # Действия с ботом
+        # ==========================
+        @self.callback_query(AdminBotActionCallback.filter())
+        async def handle_bot_actions(callback: CallbackQuery, callback_data: AdminBotActionCallback, ux: UXContext):
+            action = callback_data.action
+            telegram_id = callback_data.bot_id
+            if not telegram_id:
+                await callback.answer("Бот не найден", show_alert=True)
+                return
+            bot_uuid = await ux.admin.resolve_bot_uuid(telegram_id)
+            if bot_uuid is None:
+                await callback.answer("Бот не найден", show_alert=True)
+                return
+            page = callback_data.page or 1
+
+            if action == AdminBotAction.BACK_TO_LIST:
+                await self._render_bots_list(callback, ux, page=page)
+                return
+
+            if action == AdminBotAction.FREE_PROMPT:
+                prompt = await ux.admin.prepare_free_bot(bot_uuid)
+                keyboard = AdminInlineKeyboards.build_admin_bot_free_prompt_keyboard(prompt, page)
+                await edit_message(callback, prompt.text, reply_markup=keyboard)
+                return
+
+            if action == AdminBotAction.FREE_EXECUTE:
+                mode = callback_data.mode
+                if mode is None:
+                    await callback.answer("Не выбран режим", show_alert=True)
+                    return
+                if not isinstance(mode, AdminBotFreeMode):
+                    mode = AdminBotFreeMode(mode)
+                result = await ux.admin.free_bot(bot_uuid, mode)
+                await callback.answer(result.text, show_alert=True)
+                await self._render_bot_card(callback, ux, bot_uuid, page)
+                return
+
+            if action == AdminBotAction.DELETE_PROMPT:
+                prompt = await ux.admin.prepare_delete_bot(bot_uuid)
+                keyboard = AdminInlineKeyboards.build_admin_bot_delete_prompt_keyboard(prompt, page)
+                await edit_message(callback, prompt.text, reply_markup=keyboard)
+                return
+
+            if action == AdminBotAction.DELETE_CONFIRM:
+                result = await ux.admin.delete_bot(bot_uuid)
+                await callback.answer(result.text, show_alert=True)
+                await self._render_bots_list(callback, ux, page=page)
+                return
+
+            if action == AdminBotAction.REFRESH:
+                await self._render_bot_card(callback, ux, bot_uuid, page)
+                return
+
+            await callback.answer()
+
+        # ==========================
+        # Группы
+        # ==========================
+        @self.callback_query(AdminGroupsCallback.filter(F.action.in_({AdminGroupsAction.OPEN, AdminGroupsAction.BACK})))
+        async def groups_open(callback: CallbackQuery, state: FSMContext, ux: UXContext):
+            await state.clear()
+            text = ux.admin.groups_menu_text()
+            keyboard = AdminInlineKeyboards.build_admin_groups_menu_keyboard()
+            await edit_message(callback, text, reply_markup=keyboard)
+
+        @self.callback_query(AdminGroupsCallback.filter(F.action == AdminGroupsAction.ADD))
+        async def groups_add(callback: CallbackQuery, state: FSMContext, ux: UXContext):
+            await state.set_state(AdminStates.SEND_GROUP_IDS)
+            await edit_message(callback, ux.admin.groups_add_prompt())
+
+        @self.callback_query(AdminGroupsCallback.filter(F.action.in_({AdminGroupsAction.LIST, AdminGroupsAction.PAGE})))
+        async def groups_list(callback: CallbackQuery, callback_data: AdminGroupsCallback, ux: UXContext):
+            page = callback_data.page or 1
+            await self._render_groups_list(callback, ux, page=page)
+
+        # карточка группы / обновление / отвязка
+        @self.callback_query(AdminGroupsCallback.filter(F.action.in_({
+            AdminGroupsAction.VIEW,
+            AdminGroupsAction.CARD_REFRESH,
+            AdminGroupsAction.CARD_UNBIND,
+        })))
+        async def groups_card(
+            callback: CallbackQuery,
+            callback_data: AdminGroupsCallback,
+            state: FSMContext,
+            ux: UXContext,
+            group_service: GroupService,
+        ):
+            action = callback_data.action
+            page = callback_data.page or 1
+            if not callback_data.group_id:
+                await callback.answer("Группа не найдена", show_alert=True)
+                return
+            try:
+                group_uuid = UUID(callback_data.group_id)
+            except ValueError:
+                await callback.answer("Группа не найдена", show_alert=True)
+                return
+
+            if action == AdminGroupsAction.CARD_UNBIND:
+                group = await group_service.get(group_uuid)
+                if group is None:
+                    await callback.answer("Группа не найдена", show_alert=True)
+                    return
+                if not group.assigned_bot_id:
+                    await callback.answer("Группа уже отвязана", show_alert=True)
+                    await self._render_group_card(callback, ux, group_uuid, page)
+                    return
+                await group_service.unassign_from_bot(
+                    bot_id=group.assigned_bot_id,
+                    tg_chat_ids=[group.tg_chat_id],
+                )
+                await callback.answer("Группа отвязана", show_alert=True)
+                await self._render_group_card(callback, ux, group_uuid, page)
+                return
+
+            await self._render_group_card(callback, ux, group_uuid, page)
+
+        @self.callback_query(AdminGroupsCallback.filter(F.action == AdminGroupsAction.CARD_BACK))
+        async def groups_card_back(callback: CallbackQuery, callback_data: AdminGroupsCallback, ux: UXContext):
+            page = callback_data.page or 1
+            await self._render_groups_list(callback, ux, page=page)
+
+        # ==========================
+        # Группы: принятие id от админа
+        # ==========================
+        @self.message(AdminStates.SEND_GROUP_IDS)
+        async def receive_group_ids(message: Message, state: FSMContext, bot_service: BotService, ux: UXContext):
+            raw = message.text or ""
+            ids: list[int] = []
+            for line in raw.replace(',', ' ').split():
+                s = line.strip()
+                if not s:
+                    continue
+                try:
+                    if s.startswith('-100'):
+                        ids.append(int(s))
+                    else:
+                        if s.startswith('-'):
+                            ids.append(int(s))
+                        else:
+                            ids.append(int("-100" + s))
+                except ValueError:
+                    continue
+
+            await state.update_data(group_ids=ids)
+
+            bots = await bot_service.list(limit=1000)
+            loads = await bot_service.loads_by_bot([b.id for b in bots])
+            items: list[tuple[str, str]] = []
+            for b in bots:
+                current = loads.get(b.id, 0)
+                limit = b.max_posts
+                label = ux.admin.format_bot_load_label(b, current=current, limit=limit)
+                items.append((label, b.telegram_id))
+
+            keyboard = AdminInlineKeyboards.build_admin_groups_choose_bot_keyboard(items)
+            await message.answer(ux.admin.groups_choose_bot_prompt(), reply_markup=keyboard)
+
+        # ==========================
+        # Группы: привязка к боту
+        # ==========================
+        @self.callback_query(AdminGroupsBindCallback.filter(F.action == AdminGroupsAction.CHOOSE_BOT))
+        async def handle_groups_bind(
+            callback: CallbackQuery,
+            callback_data: AdminGroupsBindCallback,
+            state: FSMContext,
+            bot_service: BotService,
+            group_service: GroupService,
+            ux: UXContext,
+        ):
+            if not callback_data.bot_id:
+                return
+
+            bot_uuid = await ux.admin.resolve_bot_uuid(callback_data.bot_id)
+            if bot_uuid is None:
+                await callback.answer("Бот не найден", show_alert=True)
+                return
+            bot_dto = await bot_service.get(bot_uuid)
+            if not bot_dto:
+                await callback.answer("Бот не найден", show_alert=True)
+                return
+
+            data = await state.get_data()
+            group_ids: list[int] = data.get('group_ids', [])
+            if not group_ids:
+                await callback.answer("Список групп пуст", show_alert=True)
+                return
+
+            from aiogram import Bot as AioBot
+            ok: list[int] = []
+            fail: list[int] = []
+            test_bot = AioBot(token=bot_dto.token)
+            try:
+                me = await test_bot.get_me()
+                for gid in group_ids:
+                    try:
+                        member = await test_bot.get_chat_member(gid, me.id)
+                        status = getattr(member, 'status', None)
+                        logger.info(f'{status=} for bot {me.id} in group {gid}')
+                        is_admin = str(status) in ("administrator", "creator")
+                        if is_admin:
+                            ok.append(gid)
+                        else:
+                            fail.append(gid)
+                    except Exception as e:
+                        logger.exception(f"Error checking admin status for bot {me.id} in group {gid}. {type(e).__name__}: {e}")
+                        fail.append(gid)
+            finally:
+                await test_bot.session.close()
+
+            assign_result = None
+            if ok:
+                assign_result = await group_service.assign_to_bot(bot_id=bot_uuid, tg_chat_ids=ok)
+
+            previous_map: dict[UUID, BotDTO | None] = {}
+            if assign_result and assign_result.reassigned:
+                previous_ids = {item.previous_bot_id for item in assign_result.reassigned}
+                previous_map = await self._load_bots(bot_service, previous_ids)
+            text = ux.admin.format_group_bind_result(
+                assign_result=assign_result,
+                fail=fail,
+                previous_map=previous_map,
+            )
+
+            await state.clear()
+            keyboard = AdminInlineKeyboards.build_admin_groups_menu_keyboard()
+            await edit_message(callback, text, reply_markup=keyboard)
+
+        # ==========================
+        # РАССЫЛКИ (разнесено)
+        # ==========================
+
+        # назад в главное меню
+        @self.callback_query(AdminDistributionsCallback.filter(F.action == AdminDistributionsAction.BACK))
+        async def dist_back(callback: CallbackQuery, state: FSMContext, ux: UXContext):
+            await state.clear()
+            menu_view = await ux.admin.show_main_menu()
+            keyboard = AdminInlineKeyboards.build_admin_menu_keyboard(menu_view)
+            await edit_message(callback, menu_view.text, reply_markup=keyboard)
+
+        # открыть меню рассылок
+        @self.callback_query(AdminDistributionsCallback.filter(F.action == AdminDistributionsAction.OPEN))
+        async def dist_open(callback: CallbackQuery, ux: UXContext, state: FSMContext):
+            await state.clear()
+            await self._render_distributions_menu(callback, ux)
+
+        # список рассылок (все варианты страниц)
+        @self.callback_query(AdminDistributionsCallback.filter(F.action.in_({
+            AdminDistributionsAction.LIST,
+            AdminDistributionsAction.LIST_PAGE,
+            AdminDistributionsAction.LIST_BACK,
+        })))
+        async def dist_list(callback: CallbackQuery, callback_data: AdminDistributionsCallback, ux: UXContext):
+            page = callback_data.page or 1
+            await self._render_distributions_list(callback, ux, page=page)
+
+        # просмотр карточки рассылки
+        @self.callback_query(AdminDistributionsCallback.filter(F.action == AdminDistributionsAction.LIST_VIEW))
+        async def dist_view(
+            callback: CallbackQuery,
+            callback_data: AdminDistributionsCallback,
+            ux: UXContext,
+            post_service: PostService,
+        ):
+            dist_id: UUID | None = None
+            if callback_data.distribution_id:
+                dist_id = self._decode_distribution_id(callback_data.distribution_id)
+            elif callback_data.post_id:
+                post_id = self._decode_post_id(callback_data.post_id)
+                if post_id is None:
+                    await callback.answer("Рассылка не найдена", show_alert=True)
+                    return
+                dist_id = await post_service.resolve_distribution_id_by_post(post_id)
+            else:
+                return
+
+            if dist_id is None:
+                await callback.answer("Рассылка не найдена", show_alert=True)
+                return
+            page = callback_data.page or 1
+            await self._render_distribution_card(callback, ux, dist_id, page=page)
+
+        # обновить карточку рассылки
+        @self.callback_query(AdminDistributionsCallback.filter(F.action == AdminDistributionsAction.LIST_REFRESH))
+        async def dist_refresh_card(
+            callback: CallbackQuery,
+            callback_data: AdminDistributionsCallback,
+            ux: UXContext,
+            post_service: PostService,
+        ):
+            dist_id: UUID | None = None
+            if callback_data.distribution_id:
+                dist_id = self._decode_distribution_id(callback_data.distribution_id)
+            elif callback_data.post_id:
+                post_id = self._decode_post_id(callback_data.post_id)
+                if post_id is None:
+                    await callback.answer("Рассылка не найдена", show_alert=True)
+                    return
+                dist_id = await post_service.resolve_distribution_id_by_post(post_id)
+            else:
+                return
+
+            if dist_id is None:
+                await callback.answer("Рассылка не найдена", show_alert=True)
+                return
+            page = callback_data.page or 1
+            await self._render_distribution_card(callback, ux, dist_id, page=page)
+        
+        @self.callback_query(AdminDistributionsCallback.filter(F.action == AdminDistributionsAction.TOGGLE_STATUS))
+        async def dist_start_all_postings(
+            callback: CallbackQuery,
+            callback_data: AdminDistributionsCallback,
+            ux: UXContext,
+            post_service: PostService,
+        ):
+            if not callback_data.distribution_id:
+                await callback.answer("Рассылка не найдена", show_alert=True)
+                return
+
+            dist_id = self._decode_distribution_id(callback_data.distribution_id)
+            if dist_id is None:
+                await callback.answer("Рассылка не найдена", show_alert=True)
+                return
+
+            choice = (callback_data.choice or "").lower()
+            if choice not in {"pause", "resume"}:
+                await callback.answer("Неизвестное действие", show_alert=True)
+                return
+
+            summary = await post_service.get_distribution_summary(dist_id)
+            if summary is None:
+                await callback.answer("Рассылка не найдена", show_alert=True)
+                return
+
+            source_message_id = summary.get("source_message_id")
+            if source_message_id is None:
+                await callback.answer("Не удалось определить рассылку", show_alert=True)
+                return
+
+            try:
+                normalized_message_id = int(source_message_id)
+            except (TypeError, ValueError):
+                await callback.answer("Не удалось определить рассылку", show_alert=True)
+                return
+
+            source_channel_id = summary.get("source_channel_id")
+            try:
+                normalized_channel_id = int(source_channel_id) if source_channel_id is not None else None
+            except (TypeError, ValueError):
+                normalized_channel_id = None
+
+            source_username = summary.get("source_channel_username")
+
+            if choice == "pause":
+                affected = await post_service.bulk_pause_distribution(
+                    source_channel_username=source_username,
+                    source_channel_id=normalized_channel_id,
+                    source_message_id=normalized_message_id,
+                )
+                feedback = "Нет активных рассылок для остановки" if affected == 0 else f"Остановлено {affected} пост(ов)"
+            else:
+                affected = await post_service.bulk_resume_distribution(
+                    source_channel_username=source_username,
+                    source_channel_id=normalized_channel_id,
+                    source_message_id=normalized_message_id,
+                )
+                feedback = "Нет рассылок для запуска" if affected == 0 else f"Запущено {affected} пост(ов)"
+
+            await callback.answer(feedback, show_alert=True)
+            page = callback_data.page or 1
+            await self._render_distribution_card(callback, ux, dist_id, page=page)
+
+        @self.callback_query(AdminDistributionsCallback.filter(F.action == AdminDistributionsAction.TOGGLE_NOTIFY))
+        async def dist_toggle_notify(
+            callback: CallbackQuery,
+            callback_data: AdminDistributionsCallback,
+            ux: UXContext,
+            post_service: PostService,
+        ):
+            if not callback_data.distribution_id:
+                await callback.answer("Рассылка не найдена", show_alert=True)
+                return
+
+            dist_id = self._decode_distribution_id(callback_data.distribution_id)
+            if dist_id is None:
+                await callback.answer("Рассылка не найдена", show_alert=True)
+                return
+
+            choice = (callback_data.choice or "").lower()
+            if choice not in {"on", "off"}:
+                await callback.answer("Неизвестное действие", show_alert=True)
+                return
+
+            summary = await post_service.get_distribution_summary(dist_id)
+            if summary is None:
+                await callback.answer("Рассылка не найдена", show_alert=True)
+                return
+
+            source_message_id = summary.get("source_message_id")
+            if source_message_id is None:
+                await callback.answer("Не удалось определить рассылку", show_alert=True)
+                return
+
+            try:
+                normalized_message_id = int(source_message_id)
+            except (TypeError, ValueError):
+                await callback.answer("Не удалось определить рассылку", show_alert=True)
+                return
+
+            source_channel_id = summary.get("source_channel_id")
+            try:
+                normalized_channel_id = int(source_channel_id) if source_channel_id is not None else None
+            except (TypeError, ValueError):
+                normalized_channel_id = None
+
+            source_username = summary.get("source_channel_username")
+            value = choice == "on"
+            affected = await post_service.bulk_set_notify_distribution(
+                source_channel_username=source_username,
+                source_channel_id=normalized_channel_id,
+                source_message_id=normalized_message_id,
+                value=value,
+            )
+
+            feedback = (
+                "Уведомления включены" if value else "Уведомления отключены"
+            )
+            if affected == 0:
+                feedback = "Рассылок для обновления не найдено"
+
+            await callback.answer(feedback, show_alert=True)
+            page = callback_data.page or 1
+            await self._render_distribution_card(callback, ux, dist_id, page=page)
+
+        @self.callback_query(AdminDistributionsCallback.filter(F.action == AdminDistributionsAction.SHOW_GROUPS))
+        async def dist_show_list_groups(
+            callback: CallbackQuery,
+            callback_data: AdminDistributionsCallback,
+            ux: UXContext,
+            post_service: PostService,
+        ):
+            dist_id: UUID | None = None
+            if callback_data.distribution_id:
+                dist_id = self._decode_distribution_id(callback_data.distribution_id)
+            elif callback_data.post_id:
+                post_id = self._decode_post_id(callback_data.post_id)
+                if post_id is None:
+                    await callback.answer("Рассылка не найдена", show_alert=True)
+                    return
+                dist_id = await post_service.resolve_distribution_id_by_post(post_id)
+            else:
+                return
+
+            if dist_id is None:
+                await callback.answer("Рассылка не найдена", show_alert=True)
+                return
+
+            page = callback_data.page or 1
+            card_page = callback_data.card_page or 1
+
+            await self._render_distribution_groups_list(
+                callback,
+                ux,
+                dist_id,
+                page=page,
+                card_page=card_page,
+            )
+
+        @self.callback_query(AdminDistributionsCallback.filter(F.action == AdminDistributionsAction.GROUPS_PAGE))
+        async def dist_groups_paginate(
+            callback: CallbackQuery,
+            callback_data: AdminDistributionsCallback,
+            ux: UXContext,
+            post_service: PostService,
+        ):
+            dist_id: UUID | None = None
+            if callback_data.distribution_id:
+                dist_id = self._decode_distribution_id(callback_data.distribution_id)
+            elif callback_data.post_id:
+                post_id = self._decode_post_id(callback_data.post_id)
+                if post_id is None:
+                    await callback.answer("Рассылка не найдена", show_alert=True)
+                    return
+                dist_id = await post_service.resolve_distribution_id_by_post(post_id)
+            else:
+                return
+
+            if dist_id is None:
+                await callback.answer("Рассылка не найдена", show_alert=True)
+                return
+
+            page = callback_data.page or 1
+            card_page = callback_data.card_page or 1
+            await self._render_distribution_groups_list(
+                callback,
+                ux,
+                dist_id,
+                page=page,
+                card_page=card_page,
+            )
+
+        @self.callback_query(AdminDistributionsCallback.filter(F.action == AdminDistributionsAction.GROUP_VIEW))
+        async def dist_show_group_card(
+            callback: CallbackQuery,
+            callback_data: AdminDistributionsCallback,
+            ux: UXContext,
+            post_service: PostService,
+        ):
+            if not callback_data.post_id:
+                return
+
+            post_id = self._decode_post_id(callback_data.post_id)
+            if post_id is None:
+                await callback.answer("Группа не найдена", show_alert=True)
+                return
+
+            if callback_data.distribution_id:
+                dist_id = self._decode_distribution_id(callback_data.distribution_id)
+            else:
+                dist_id = await post_service.resolve_distribution_id_by_post(post_id)
+
+            if dist_id is None:
+                await callback.answer("Рассылка не найдена", show_alert=True)
+                return
+
+            groups_page = callback_data.page or 1
+            card_page = callback_data.card_page or 1
+
+            try:
+                card = await ux.admin.show_distribution_group_card(dist_id, post_id)
+            except ValueError as exc:
+                logger.error(f"Error rendering distribution group card: {exc}")
+                await callback.answer("Данные не найдены", show_alert=True)
+                return
+
+            keyboard = AdminInlineKeyboards.build_admin_distribution_group_card_keyboard(
+                card,
+                distribution_id=dist_id,
+                groups_page=groups_page,
+                card_page=card_page,
+            )
+            await edit_message(callback, card.text, reply_markup=keyboard)
+
+        # отмена создания
+        @self.callback_query(AdminDistributionsCallback.filter(F.action == AdminDistributionsAction.CANCEL))
+        async def dist_cancel(callback: CallbackQuery, state: FSMContext, ux: UXContext):
+            await state.clear()
+            text = ux.admin.distribution_cancelled_text()
+            keyboard = AdminInlineKeyboards.build_admin_distributions_menu_keyboard()
+            await edit_message(callback, text, reply_markup=keyboard)
+
+        # старт создания
+        @self.callback_query(AdminDistributionsCallback.filter(F.action == AdminDistributionsAction.START_CREATE))
+        async def dist_start_create(callback: CallbackQuery, state: FSMContext, ux: UXContext):
+            await state.clear()
+            await state.set_state(AdminStates.DISTRIBUTION_WAIT_NAME)
+            await state.update_data(
+                dist_name=None,
+                dist_mode=None,
+                dist_target=None,
+                dist_groups=[],
+                dist_selected_bots=[],
+                dist_bot_list=[],
+                dist_bot_page=1,
+                dist_summary_prefix="",
+                dist_pause_between_attempts_s=60,
+                dist_delete_last_attempt=False,
+                dist_pin_after_post=False,
+                dist_num_attempt_for_pin_post=None,
+                dist_target_attempts=1,
+                dist_notify_on_failure=True,
+            )
+            await self._prompt_distribution_name(callback, ux)
+
+        # автоимя
+        @self.callback_query(AdminDistributionsCallback.filter(F.action == AdminDistributionsAction.NAME_AUTO))
+        async def dist_name_auto(callback: CallbackQuery, state: FSMContext, ux: UXContext):
+            auto_name = self._generate_distribution_name()
+            await state.update_data(dist_name=auto_name)
+            await state.set_state(AdminStates.DISTRIBUTION_WAIT_MODE)
+            await self._render_distribution_mode(callback, ux, name=auto_name)
+            await callback.answer(ux.admin.distribution_name_autoset_text(auto_name), show_alert=False)
+
+        # выбор режима create / replace
+        @self.callback_query(AdminDistributionsCallback.filter(F.action == AdminDistributionsAction.SET_MODE))
+        async def dist_set_mode(callback: CallbackQuery, callback_data: AdminDistributionsCallback, state: FSMContext, ux: UXContext):
+            if not callback_data.mode:
+                return
+            if callback_data.mode not in {"create", "replace"}:
+                return
+            data = await state.get_data()
+            name = data.get("dist_name")
+            await state.update_data(dist_mode=callback_data.mode)
+            await self._render_distribution_target(callback, ux, mode=callback_data.mode, name=name)
+
+        # открыть выбор цели (all/groups/bots)
+        @self.callback_query(AdminDistributionsCallback.filter(F.action == AdminDistributionsAction.SELECT_TARGET))
+        async def dist_select_target(callback: CallbackQuery, state: FSMContext, ux: UXContext):
+            data = await state.get_data()
+            mode = data.get("dist_mode") or "create"
+            await state.set_state(AdminStates.DISTRIBUTION_WAIT_MODE)
+            await state.update_data(dist_summary_prefix="")
+            await self._render_distribution_target(callback, ux, mode=mode, name=data.get("dist_name"))
+
+        # установка цели
+        @self.callback_query(AdminDistributionsCallback.filter(F.action == AdminDistributionsAction.SET_TARGET))
+        async def dist_set_target(
+            callback: CallbackQuery,
+            callback_data: AdminDistributionsCallback,
+            state: FSMContext,
+            ux: UXContext,
+            bot_service: BotService,
+            group_service: GroupService,
+        ):
+            if not callback_data.target:
+                return
+            target = callback_data.target
+            data = await state.get_data()
+            mode = data.get("dist_mode") or "create"
+            await state.update_data(dist_target=target, dist_groups=[])
+
+            # 1) выбор групп вручную
+            if target == "groups":
+                await state.set_state(AdminStates.DISTRIBUTION_WAIT_GROUP_IDS)
+                await self._prompt_distribution_groups_input(callback, ux)
+                return
+
+            # 2) выбор ботов -> из них получаем группы
+            if target == "bots":
+                bots = await bot_service.list(limit=1000)
+                bot_entries = [
+                    {
+                        "id": str(bot.id),
+                        "label": ux.admin.format_bot_label(bot),
+                    }
+                    for bot in bots
+                ]
+                await state.set_state(AdminStates.DISTRIBUTION_SELECT_BOTS)
+                await state.update_data(
+                    dist_bot_list=bot_entries,
+                    dist_selected_bots=[],
+                    dist_bot_page=callback_data.page or 1,
+                )
+                await self._render_distribution_bot_select(callback, ux, state, page=callback_data.page or 1)
+                return
+
+            # 3) all -> собираем все привязанные группы
+            if target == "all":
+                groups = await group_service.list_bound(limit=2000)
+                groups = await group_service.ensure_metadata_bulk(groups, bot_service)
+                if not groups:
+                    await callback.answer(ux.admin.distribution_error_no_groups_text(), show_alert=True)
+                    return
+                packed = [self._pack_group_dto(g) for g in groups]
+                summary = ux.admin.distribution_all_groups_selected_text(len(packed))
+                await state.update_data(
+                    dist_groups=packed,
+                    dist_summary_prefix=summary,
+                )
+                await state.set_state(AdminStates.DISTRIBUTION_WAIT_PAUSE)
+                await self._prompt_distribution_pause(callback, ux, summary)
+                return
+
+        # установить "удалять предыдущее"
+        @self.callback_query(AdminDistributionsCallback.filter(F.action == AdminDistributionsAction.SET_DELETE_LAST))
+        async def dist_set_delete_last(callback: CallbackQuery, callback_data: AdminDistributionsCallback, state: FSMContext, ux: UXContext):
+            choice = (callback_data.choice or "").lower()
+            if choice not in {"yes", "no"}:
+                await callback.answer(ux.admin.distribution_bool_invalid_text(), show_alert=True)
+                return
+            await state.update_data(dist_delete_last_attempt=choice == "yes")
+            await state.set_state(AdminStates.DISTRIBUTION_WAIT_PIN)
+            await self._prompt_distribution_pin(callback, ux)
+            await callback.answer()
+
+        # установить "закреплять"
+        @self.callback_query(AdminDistributionsCallback.filter(F.action == AdminDistributionsAction.SET_PIN))
+        async def dist_set_pin(callback: CallbackQuery, callback_data: AdminDistributionsCallback, state: FSMContext, ux: UXContext):
+            choice = (callback_data.choice or "").lower()
+            if choice not in {"yes", "no"}:
+                await callback.answer(ux.admin.distribution_bool_invalid_text(), show_alert=True)
+                return
+            await state.update_data(dist_pin_after_post=choice == "yes")
+            if choice == "yes":
+                await state.set_state(AdminStates.DISTRIBUTION_WAIT_PIN_FREQUENCY)
+                await self._prompt_distribution_pin_frequency(callback, ux)
+            else:
+                await state.update_data(dist_num_attempt_for_pin_post=None)
+                await state.set_state(AdminStates.DISTRIBUTION_WAIT_TARGET_ATTEMPTS)
+                await self._prompt_distribution_target_attempts(callback, ux)
+            await callback.answer()
+
+        # выбор бота из списка при target == bots
+        @self.callback_query(AdminDistributionsCallback.filter(F.action == AdminDistributionsAction.SELECT_BOT))
+        async def dist_select_bot(callback: CallbackQuery, callback_data: AdminDistributionsCallback, state: FSMContext, ux: UXContext, group_service: GroupService):
+            data = await state.get_data()
+            bot_list: list[dict] = data.get("dist_bot_list", [])
+            if not bot_list:
+                await callback.answer()
+                return
+            selected: set[str] = set(data.get("dist_selected_bots", []))
+            bot_id = callback_data.bot_id or ''
+            if bot_id in selected:
+                selected.remove(bot_id)
+            else:
+                selected.add(bot_id)
+            await state.update_data(dist_selected_bots=list(selected))
+            page = callback_data.page or data.get("dist_bot_page", 1) or 1
+            await self._render_distribution_bot_select(callback, ux, state, page=page)
+
+        # пагинация по ботам при выборе цели "bots"
+        @self.callback_query(AdminDistributionsCallback.filter(F.action == AdminDistributionsAction.BOT_PAGE))
+        async def dist_bot_page(callback: CallbackQuery, callback_data: AdminDistributionsCallback, state: FSMContext, ux: UXContext):
+            data = await state.get_data()
+            page = callback_data.page or data.get("dist_bot_page", 1) or 1
+            await self._render_distribution_bot_select(callback, ux, state, page=page)
+
+        # завершить выбор ботов -> получить группы по этим ботам
+        @self.callback_query(AdminDistributionsCallback.filter(F.action == AdminDistributionsAction.FINISH_BOT_SELECTION))
+        async def dist_finish_bot_selection(
+            callback: CallbackQuery,
+            state: FSMContext,
+            ux: UXContext,
+            group_service: GroupService,
+            bot_service: BotService,
+        ):
+            data = await state.get_data()
+            selected_ids: list[str] = data.get("dist_selected_bots", [])
+            if not selected_ids:
+                await callback.answer(ux.admin.distribution_bot_selection_empty_text(), show_alert=True)
+                return
+            groups_map: dict[str, dict] = {}
+            for bot_id_str in selected_ids:
+                try:
+                    bot_uuid = UUID(bot_id_str)
+                except ValueError:
+                    continue
+                bot_groups = await group_service.list_by_bot(bot_uuid, limit=1000)
+                bot_groups = await group_service.ensure_metadata_bulk(bot_groups, bot_service)
+                for group in bot_groups:
+                    groups_map[str(group.id)] = self._pack_group_dto(group)
+            if not groups_map:
+                await callback.answer(ux.admin.distribution_bot_selection_no_groups_text(), show_alert=True)
+                return
+            packed = list(groups_map.values())
+            info = ux.admin.distribution_groups_resolved_text(len(packed))
+            await state.update_data(dist_groups=packed, dist_summary_prefix=info)
+            await state.set_state(AdminStates.DISTRIBUTION_WAIT_PAUSE)
+            await self._prompt_distribution_pause(callback, ux, info)
+
+        # ==========================
+        # Сообщения, которые продолжают создание рассылки
+        # ==========================
+        @self.message(AdminStates.DISTRIBUTION_WAIT_NAME)
+        async def distribution_receive_name(message: Message, state: FSMContext, ux: UXContext):
+            name = (message.text or "").strip()
+            if not name:
+                await message.answer(ux.admin.distribution_name_invalid_text())
+                return
+            await state.update_data(dist_name=name)
+            await state.set_state(AdminStates.DISTRIBUTION_WAIT_MODE)
+            await self._render_distribution_mode(message, ux, name=name)
+
+        @self.message(AdminStates.DISTRIBUTION_WAIT_GROUP_IDS)
+        async def distribution_receive_group_ids(
+            message: Message,
+            state: FSMContext,
+            group_service: GroupService,
+            bot_service: BotService,
+            ux: UXContext,
+        ):
+            text = message.text or ""
+            chat_ids: list[int] = []
+            for token in text.replace(',', ' ').split():
+                token = token.strip()
+                if not token:
+                    continue
+                try:
+                    if token.startswith('-100'):
+                        chat_ids.append(int(token))
+                    elif token.startswith('-'):
+                        chat_ids.append(int(token))
+                    else:
+                        chat_ids.append(int("-100" + token))
+                except ValueError:
+                    continue
+            if not chat_ids:
+                await message.answer(ux.admin.distribution_groups_not_found_text())
+                return
+            unique_ids = list(dict.fromkeys(chat_ids))
+            groups: list[dict] = []
+            missing: list[int] = []
+            for chat_id in unique_ids:
+                group = await group_service.get_by_tg_chat_id(chat_id)
+                if not group:
+                    missing.append(chat_id)
+                    continue
+                group = await group_service.ensure_metadata(group, bot_service)
+                groups.append(self._pack_group_dto(group))
+            if not groups:
+                await message.answer(ux.admin.distribution_groups_not_found_text())
+                return
+            await state.update_data(dist_groups=groups, dist_target="groups")
+            summary = ux.admin.distribution_groups_resolved_text(len(groups))
+            if missing:
+                summary += "\n" + ux.admin.distribution_groups_missing_text(missing)
+            await state.update_data(dist_summary_prefix=summary)
+            await state.set_state(AdminStates.DISTRIBUTION_WAIT_PAUSE)
+            await self._prompt_distribution_pause(message, ux, summary)
+
+        @self.message(AdminStates.DISTRIBUTION_WAIT_PAUSE)
+        async def distribution_receive_pause(message: Message, state: FSMContext, ux: UXContext):
+            text = (message.text or "").strip()
+            if not text:
+                pause = 60
+            else:
+                try:
+                    pause = int(text)
+                except ValueError:
+                    await message.answer(ux.admin.distribution_pause_invalid_text())
+                    return
+                if pause < 0:
+                    await message.answer(ux.admin.distribution_pause_invalid_text())
+                    return
+            await state.update_data(dist_pause_between_attempts_s=pause)
+            await state.set_state(AdminStates.DISTRIBUTION_WAIT_DELETE_LAST)
+            await self._prompt_distribution_delete_last(message, ux)
+
+        @self.message(AdminStates.DISTRIBUTION_WAIT_DELETE_LAST)
+        async def distribution_receive_delete_last(message: Message, state: FSMContext, ux: UXContext):
+            choice = self._parse_bool(message.text, default=False)
+            if choice is None:
+                await message.answer(ux.admin.distribution_bool_invalid_text())
+                return
+            await state.update_data(dist_delete_last_attempt=choice)
+            await state.set_state(AdminStates.DISTRIBUTION_WAIT_PIN)
+            await self._prompt_distribution_pin(message, ux)
+
+        @self.message(AdminStates.DISTRIBUTION_WAIT_PIN)
+        async def distribution_receive_pin(message: Message, state: FSMContext, ux: UXContext):
+            choice = self._parse_bool(message.text, default=False)
+            if choice is None:
+                await message.answer(ux.admin.distribution_bool_invalid_text())
+                return
+            await state.update_data(dist_pin_after_post=choice)
+            if not choice:
+                await state.update_data(dist_num_attempt_for_pin_post=None)
+                await state.set_state(AdminStates.DISTRIBUTION_WAIT_TARGET_ATTEMPTS)
+                await self._prompt_distribution_target_attempts(message, ux)
+                return
+            await state.set_state(AdminStates.DISTRIBUTION_WAIT_PIN_FREQUENCY)
+            await self._prompt_distribution_pin_frequency(message, ux)
+
+        @self.message(AdminStates.DISTRIBUTION_WAIT_PIN_FREQUENCY)
+        async def distribution_receive_pin_frequency(message: Message, state: FSMContext, ux: UXContext):
+            text = (message.text or "").strip()
+            if not text:
+                frequency: int | None = None
+            else:
+                try:
+                    value = int(text)
+                except ValueError:
+                    await message.answer(ux.admin.distribution_pin_frequency_invalid_text())
+                    return
+                if value < 0:
+                    await message.answer(ux.admin.distribution_pin_frequency_invalid_text())
+                    return
+                frequency = value
+            normalized_frequency = None if frequency is None or frequency == 0 else frequency
+            await state.update_data(dist_num_attempt_for_pin_post=normalized_frequency)
+            await state.set_state(AdminStates.DISTRIBUTION_WAIT_TARGET_ATTEMPTS)
+            await self._prompt_distribution_target_attempts(message, ux)
+
+        @self.message(AdminStates.DISTRIBUTION_WAIT_TARGET_ATTEMPTS)
+        async def distribution_receive_target_attempts(message: Message, state: FSMContext, ux: UXContext):
+            text = (message.text or "").strip()
+            if not text:
+                attempts = 1
+            else:
+                try:
+                    attempts = int(text)
+                except ValueError:
+                    await message.answer(ux.admin.distribution_target_attempts_invalid_text())
+                    return
+                if attempts == 0 or attempts < -1:
+                    await message.answer(ux.admin.distribution_target_attempts_invalid_text())
+                    return
+            await state.update_data(dist_target_attempts=attempts)
+            data = await state.get_data()
+            summary_prefix = data.get("dist_summary_prefix", "")
+            name_line = ux.admin.distribution_name_selected_text(data.get("dist_name"))
+            config_summary = self._compose_distribution_config_summary(data)
+            combined_summary = "\n".join(filter(None, [name_line, summary_prefix, config_summary]))
+            await state.update_data(dist_summary_prefix=summary_prefix)
+            await state.set_state(AdminStates.DISTRIBUTION_WAIT_SOURCE)
+            await self._prompt_distribution_source(message, ux, combined_summary)
+
+        @self.message(AdminStates.DISTRIBUTION_WAIT_SOURCE)
+        async def distribution_receive_source(
+            message: Message,
+            state: FSMContext,
+            post_service: PostService,
+            ux: UXContext,
+        ):
+            parsed = self._extract_distribution_source(message)
+            if parsed is None:
+                await message.reply(ux.admin.distribution_bad_source_text())
+                return
+            source_username, source_channel_id, source_message_id = parsed
+            data = await state.get_data()
+            groups: list[dict] = data.get("dist_groups", [])
+            if not groups:
+                await message.reply(ux.admin.distribution_error_no_groups_text())
+                await state.clear()
+                return
+            mode = data.get("dist_mode", "create")
+            pause_between_attempts_s = int(data.get("dist_pause_between_attempts_s", 60))
+            delete_last_attempt = bool(data.get("dist_delete_last_attempt", False))
+            pin_after_post = bool(data.get("dist_pin_after_post", False))
+            num_attempt_for_pin_post = data.get("dist_num_attempt_for_pin_post")
+            target_attempts = int(data.get("dist_target_attempts", 1))
+            distribution_name = data.get("dist_name") or self._generate_distribution_name()
+            notify_on_failure = bool(data.get("dist_notify_on_failure", True))
+            group_ids = [UUID(group["id"]) for group in groups]
+            deleted_count = 0
+            if mode == "replace" and group_ids:
+                deleted_count = await post_service.delete_active_by_groups(group_ids)
+
+            created = 0
+            skipped = 0
+            errors: list[str] = []
+            for group in groups:
+                assigned_bot_id = group.get("assigned_bot_id")
+                if not assigned_bot_id:
+                    skipped += 1
+                    continue
+                try:
+                    await post_service.create(
+                        group_id=UUID(group["id"]),
+                        target_chat_id=group["tg_chat_id"],
+                        distribution_name=distribution_name,
+                        source_channel_username=source_username,
+                        source_channel_id=source_channel_id,
+                        source_message_id=source_message_id,
+                        bot_id=UUID(assigned_bot_id),
+                        pause_between_attempts_s=pause_between_attempts_s,
+                        delete_last_attempt=delete_last_attempt,
+                        pin_after_post=pin_after_post,
+                        num_attempt_for_pin_post=num_attempt_for_pin_post,
+                        target_attempts=target_attempts,
+                        notify_on_failure=notify_on_failure,
+                    )
+                    created += 1
+                except Exception as exc:  # оставляю, чтобы не ломать твой UX
+                    skipped += 1
+                    errors.append(f"{group['tg_chat_id']}: {exc}")
+
+            await state.clear()
+            result_text = ux.admin.distribution_result_text(
+                mode=mode,
+                deleted_count=deleted_count,
+                created=created,
+                skipped=skipped,
+                errors=errors,
+            )
+            keyboard = AdminInlineKeyboards.build_admin_distributions_menu_keyboard()
+            await message.answer(result_text, reply_markup=keyboard)
+
+    # ==========================
+    # ХЕЛПЕРЫ
+    # ==========================
+    async def _render_bots_list(self, event: CallbackQuery | Message, ux: UXContext, *, page: int) -> None:
+        view = await ux.admin.show_bots_list(page=page)
+        keyboard = AdminInlineKeyboards.build_admin_bots_list_keyboard(view)
+        await edit_message(event, view.text, reply_markup=keyboard)
+
+    async def _render_bot_card(self, event: CallbackQuery | Message, ux: UXContext, bot_id: UUID, page: int) -> None:
+        card = await ux.admin.show_bot_card(bot_id)
+        keyboard = AdminInlineKeyboards.build_admin_bot_card_keyboard(card, page=page)
+        await edit_message(event, card.text, reply_markup=keyboard)
+
+    async def _render_groups_list(self, event: CallbackQuery | Message, ux: UXContext, *, page: int) -> None:
+        view = await ux.admin.show_groups_list(page=page)
+        keyboard = AdminInlineKeyboards.build_admin_groups_list_keyboard(view)
+        await edit_message(event, view.text, reply_markup=keyboard)
+
+    async def _render_group_card(self, event: CallbackQuery | Message, ux: UXContext, group_id: UUID, page: int) -> None:
+        card = await ux.admin.show_group_card(group_id)
+        keyboard = AdminInlineKeyboards.build_admin_group_card_keyboard(card, page=page)
+        await edit_message(event, card.text, reply_markup=keyboard)
+
+    async def _render_distributions_list(self, event: CallbackQuery | Message, ux: UXContext, *, page: int) -> None:
+        view = await ux.admin.show_distributions_list(page=page)
+        keyboard = AdminInlineKeyboards.build_admin_distributions_list_keyboard(view)
+        await edit_message(event, view.text, reply_markup=keyboard)
+
+    async def _render_distribution_card(
+        self,
+        event: CallbackQuery,
+        ux: UXContext,
+        distribution_id: UUID,
+        *,
+        page: int | None,
+    ) -> None:
+        try:
+            card = await ux.admin.show_distribution_card(distribution_id)
+        except ValueError as e:
+            logger.error(f"Error rendering distribution card: {e}")
+            if isinstance(event, CallbackQuery):
+                await event.answer("Рассылка не найдена", show_alert=True)
+            return
+        keyboard = AdminInlineKeyboards.build_admin_distribution_card_keyboard(card, page=page)
+        
+        await edit_message(event, card.text, reply_markup=keyboard)
+
+    async def _render_distribution_groups_list(
+        self,
+        event: CallbackQuery,
+        ux: UXContext,
+        distribution_id: UUID,
+        *,
+        page: int,
+        card_page: int,
+    ) -> None:
+        try:
+            view = await ux.admin.show_distribution_groups(distribution_id, page=page)
+        except ValueError as exc:
+            logger.error(f"Error rendering distribution groups list: {exc}")
+            await event.answer("Рассылка не найдена", show_alert=True)
+            return
+
+        keyboard = AdminInlineKeyboards.build_admin_distribution_groups_keyboard(
+            view,
+            distribution_id=distribution_id,
+            card_page=card_page,
+            anchor_post_id=view.anchor_post_id,
+        )
+        await edit_message(event, view.text, reply_markup=keyboard)
+
+    async def _render_distributions_menu(self, event: CallbackQuery | Message, ux: UXContext) -> None:
+        text = ux.admin.distributions_menu_text()
+        keyboard = AdminInlineKeyboards.build_admin_distributions_menu_keyboard()
+        await edit_message(event, text, reply_markup=keyboard)
+
+    async def _prompt_distribution_name(self, event: CallbackQuery | Message, ux: UXContext) -> None:
+        text = ux.admin.distribution_name_prompt_text()
+        keyboard = AdminInlineKeyboards.build_admin_distribution_name_keyboard()
+        if isinstance(event, Message):
+            await event.answer(text, reply_markup=keyboard)
+        else:
+            await edit_message(event, text, reply_markup=keyboard)
+
+    async def _render_distribution_mode(self, event: CallbackQuery | Message, ux: UXContext, *, name: str | None = None) -> None:
+        text = ux.admin.distribution_mode_prompt_text(name)
+        keyboard = AdminInlineKeyboards.build_admin_distribution_mode_keyboard()
+        await edit_message(event, text, reply_markup=keyboard)
+
+    async def _render_distribution_target(self, event: CallbackQuery | Message, ux: UXContext, *, mode: str, name: str | None = None) -> None:
+        text = ux.admin.distribution_target_prompt_text(mode, name)
+        keyboard = AdminInlineKeyboards.build_admin_distribution_target_keyboard()
+        await edit_message(event, text, reply_markup=keyboard)
+
+    async def _prompt_distribution_groups_input(self, event: CallbackQuery | Message, ux: UXContext) -> None:
+        text = ux.admin.distribution_groups_input_text()
+        keyboard = AdminInlineKeyboards.build_admin_distribution_groups_input_keyboard()
+        await edit_message(event, text, reply_markup=keyboard)
+
+    async def _render_distribution_bot_select(self, event: CallbackQuery | Message, ux: UXContext, state: FSMContext, *, page: int) -> None:
+        data = await state.get_data()
+        bot_entries: list[dict] = data.get('dist_bot_list', [])
+        selected_ids = set(data.get('dist_selected_bots', []))
+        if not bot_entries:
+            await edit_message(
+                event,
+                ux.admin.distribution_bot_selection_no_groups_text(),
+                reply_markup=AdminInlineKeyboards.build_admin_distribution_target_keyboard(),
+            )
+            return
+
+        page_size = 6
+        total_pages = max(1, math.ceil(len(bot_entries) / page_size))
+        page = max(1, min(page, total_pages))
+        start = (page - 1) * page_size
+        subset = bot_entries[start:start + page_size]
+        items = [(entry['id'], entry['label'], entry['id'] in selected_ids) for entry in subset]
+        keyboard = AdminInlineKeyboards.build_admin_distribution_bot_select_keyboard(items, page=page, total_pages=total_pages)
+
+        text_lines = [ux.admin.distribution_bot_selection_intro()]
+        text_lines.append(ux.admin.distribution_bot_selection_selected_text(len(selected_ids)))
+        await edit_message(event, "\n\n".join(filter(None, text_lines)), reply_markup=keyboard)
+        await state.update_data(dist_bot_page=page)
+
+    async def _prompt_distribution_pause(self, event: CallbackQuery | Message, ux: UXContext, prefix: str | None = None) -> None:
+        text = ux.admin.distribution_pause_prompt_text(prefix)
+        keyboard = AdminInlineKeyboards.build_admin_distribution_source_keyboard()
+        if isinstance(event, Message):
+            await event.answer(text, reply_markup=keyboard)
+        else:
+            await edit_message(event, text, reply_markup=keyboard)
+
+    async def _prompt_distribution_delete_last(self, event: CallbackQuery | Message, ux: UXContext) -> None:
+        text = ux.admin.distribution_delete_last_prompt_text()
+        keyboard = AdminInlineKeyboards.build_admin_distribution_boolean_keyboard(AdminDistributionsAction.SET_DELETE_LAST)
+        if isinstance(event, Message):
+            await event.answer(text, reply_markup=keyboard)
+        else:
+            await edit_message(event, text, reply_markup=keyboard)
+
+    async def _prompt_distribution_pin(self, event: CallbackQuery | Message, ux: UXContext) -> None:
+        text = ux.admin.distribution_pin_prompt_text()
+        keyboard = AdminInlineKeyboards.build_admin_distribution_boolean_keyboard(AdminDistributionsAction.SET_PIN)
+        if isinstance(event, Message):
+            await event.answer(text, reply_markup=keyboard)
+        else:
+            await edit_message(event, text, reply_markup=keyboard)
+
+    async def _prompt_distribution_pin_frequency(self, event: CallbackQuery | Message, ux: UXContext) -> None:
+        text = ux.admin.distribution_pin_frequency_prompt_text()
+        keyboard = AdminInlineKeyboards.build_admin_distribution_source_keyboard()
+        if isinstance(event, Message):
+            await event.answer(text, reply_markup=keyboard)
+        else:
+            await edit_message(event, text, reply_markup=keyboard)
+
+    async def _prompt_distribution_target_attempts(self, event: CallbackQuery | Message, ux: UXContext) -> None:
+        text = ux.admin.distribution_target_attempts_prompt_text()
+        keyboard = AdminInlineKeyboards.build_admin_distribution_source_keyboard()
+        if isinstance(event, Message):
+            await event.answer(text, reply_markup=keyboard)
+        else:
+            await edit_message(event, text, reply_markup=keyboard)
+
+    async def _prompt_distribution_source(self, event: CallbackQuery | Message, ux: UXContext, prefix: str) -> None:
+        text = ux.admin.distribution_source_prompt(prefix)
+        keyboard = AdminInlineKeyboards.build_admin_distribution_source_keyboard()
+        if isinstance(event, Message):
+            await event.answer(text, reply_markup=keyboard)
+        else:
+            await edit_message(event, text, reply_markup=keyboard)
+
+    def _pack_group_dto(self, group) -> dict[str, object]:
+        assigned_bot_id = str(group.assigned_bot_id) if group.assigned_bot_id else None
+        return {
+            "id": str(group.id),
+            "tg_chat_id": group.tg_chat_id,
+            "assigned_bot_id": assigned_bot_id,
+            "title": group.title or "",
+            "username": getattr(group, "username", None) or "",
+        }
+
+    def _extract_distribution_source(self, message: Message) -> tuple[str, int, int] | None:
+        if message.forward_from_chat and message.forward_from_message_id:
+            chat = message.forward_from_chat
+            if chat.type != ChatType.CHANNEL:
+                return None
+            username = chat.username or str(chat.id)
+            channel_id = chat.id
+            message_id = message.forward_from_message_id
+            return username, channel_id, message_id
+        return None
+
+    def _parse_bool(self, value: str | None, *, default: bool | None = None) -> bool | None:
+        if value is None:
+            return default
+        normalized = value.strip().lower()
+        if not normalized:
+            return default
+        true_tokens = {"да", "yes", "y", "true", "1", "+"}
+        false_tokens = {"нет", "no", "n", "false", "0", "-"}
+        if normalized in true_tokens:
+            return True
+        if normalized in false_tokens:
+            return False
+        return None
+
+    def _compose_distribution_config_summary(self, data: dict) -> str:
+        pause = int(data.get("dist_pause_between_attempts_s", 60))
+        delete_last = bool(data.get("dist_delete_last_attempt", False))
+        pin_after = bool(data.get("dist_pin_after_post", False))
+        frequency = data.get("dist_num_attempt_for_pin_post")
+        attempts = int(data.get("dist_target_attempts", 1))
+
+        lines: list[str] = [
+            f"⏳ Пауза между попытками: {pause} с",
+            f"♻️ Удалять предыдущее сообщение: {'да' if delete_last else 'нет'}",
+        ]
+
+        if pin_after:
+            if frequency in (None, 0):
+                freq_text = "каждую отправку"
+            else:
+                freq_text = f"каждое {frequency}-е сообщение"
+            lines.append(f"📌 Закреплять: да ({freq_text})")
+        else:
+            lines.append("📌 Закреплять: нет")
+
+        attempts_text = "бесконечно" if attempts == -1 else str(attempts)
+        lines.append(f"🎯 Количество попыток: {attempts_text}")
+        return "\n".join(lines)
+
+    async def _load_bots(self, bot_service: BotService, bot_ids: set[UUID]) -> dict[UUID, BotDTO | None]:
+        out: dict[UUID, BotDTO | None] = {}
+        for bot_id in bot_ids:
+            bot = await bot_service.get(bot_id)
+            out[bot_id] = bot
+        return out
+
+    def _generate_distribution_name(self) -> str:
+        return datetime.now().strftime("Рассылка %d.%m %H:%M")
+
+    def _decode_distribution_id(self, value: str) -> UUID | None:
+        # во входящих колбэках оно у тебя в base64 urlsafe. тут же и декодим
+        try:
+            return UUID(bytes=base64.urlsafe_b64decode(value + "=="))
+        except ValueError as e:
+            logger.error(f"Error decoding distribution ID: {e}")
+            return None
+
+    def _decode_post_id(self, value: str) -> UUID | None:
+        try:
+            return UUID(bytes=base64.urlsafe_b64decode(value + "=="))
+        except ValueError as e:
+            logger.error(f"Error decoding post ID: {e}")
+            return None

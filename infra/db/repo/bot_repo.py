@@ -5,11 +5,11 @@ from logging import getLogger
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import and_, func, update
+from sqlalchemy import and_, func, or_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from infra.db.models import Bot, Post
+from infra.db.models import Bot, Post, Group
 
 logger = getLogger(__name__)
 
@@ -32,6 +32,17 @@ class SQLAlchemyBotRepository:
 
     async def get_by_token(self, token: str) -> Optional[Bot]:
         stmt = select(Bot).where(Bot.token == token)
+        res = await self.__session.execute(stmt)
+        return res.scalars().first()
+
+    async def get_by_telegram_id(self, telegram_id: str) -> Optional[Bot]:
+        token_prefix = f"{telegram_id}:"
+        stmt = select(Bot).where(
+            or_(
+                Bot.token.startswith(token_prefix),
+                Bot.token == telegram_id,
+            )
+        )
         res = await self.__session.execute(stmt)
         return res.scalars().first()
 
@@ -82,23 +93,30 @@ class SQLAlchemyBotRepository:
         return int(res.scalar_one()) > 0
 
     async def count_active_posts(self, bot_id: UUID) -> int:
-        stmt = select(func.count()).select_from(Post).where(
-            and_(Post.bot_id == bot_id, Post.status.in_(["active", "paused", "error"]))
+        stmt = (
+            select(func.count()).select_from(Post)
+            .join(Group, Group.id == Post.group_id)
+            .where(and_(Group.assigned_bot_id == bot_id, Post.status.in_(["active", "paused", "error"])) )
         )
         res = await self.__session.execute(stmt)
         return int(res.scalar_one())
 
     async def loads_by_bot(self, bot_ids: Optional[list[UUID]] = None) -> dict[UUID, int]:
-        stmt = select(Post.bot_id, func.count()).where(Post.status.in_(["active", "paused", "error"]))
+        stmt = (
+            select(Group.assigned_bot_id, func.count())
+            .select_from(Post)
+            .join(Group, Group.id == Post.group_id)
+            .where(Post.status.in_(["active", "paused", "error"]))
+        )
         if bot_ids:
-            stmt = stmt.where(Post.bot_id.in_(bot_ids))
-        stmt = stmt.group_by(Post.bot_id)
+            stmt = stmt.where(Group.assigned_bot_id.in_(bot_ids))
+        stmt = stmt.group_by(Group.assigned_bot_id)
         res = await self.__session.execute(stmt)
         rows = res.all()
         out: dict[UUID, int] = {}
-        for bot_id_val, count in rows:
-            if bot_id_val:
-                out[bot_id_val] = int(count)
+        for assigned_bot_id, count in rows:
+            if assigned_bot_id:
+                out[assigned_bot_id] = int(count)
         return out
 
     async def list(self, *, limit: int = 100, offset: int = 0) -> list[Bot]:

@@ -1,22 +1,17 @@
 from __future__ import annotations
 
-from enum import Enum
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import BigInteger, ForeignKey, String, Text, DateTime, Index
+from sqlalchemy import BigInteger, ForeignKey, String, Text, DateTime, Index, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from common.enums.post_status import PostStatus
+
+from datetime import datetime
 
 from .base import Base, TimestampMixin, VersionedMixin, UUIDPkMixin, ModelHelpersMixin
-
-
-class PostStatus(str, Enum):
-    ACTIVE = "active"
-    PAUSED = "paused"
-    ERROR = "error"
-    DONE = "done"
 
 
 class Post(Base, TimestampMixin, VersionedMixin, UUIDPkMixin, ModelHelpersMixin):
@@ -25,14 +20,28 @@ class Post(Base, TimestampMixin, VersionedMixin, UUIDPkMixin, ModelHelpersMixin)
 
     status: Mapped[str] = mapped_column(String(16), nullable=False, default=PostStatus.ACTIVE.value, server_default=text("'active'"))
 
+    target_chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    distribution_name: Mapped[Optional[str]] = mapped_column(String(255))
+    notify_on_failure: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
     source_channel_username: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_channel_id: Mapped[Optional[int]] = mapped_column(BigInteger)
     source_message_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
-    last_attempt_at: Mapped[Optional[DateTime]] = mapped_column(DateTime(timezone=True))
+    last_attempt_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[Optional[str]] = mapped_column(Text)
 
-    group = relationship("Group", lazy="joined")
-    bot = relationship("Bot", lazy="joined")
+    count_attempts: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default=text("0"))
+    target_attempts: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+    delete_last_attempt: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    pin_after_post: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    num_attempt_for_pin_post: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True, default=None, server_default=None)
+
+    pause_between_attempts_s: Mapped[int] = mapped_column(BigInteger, nullable=False, default=60, server_default=text("60"))
+
+    group: Mapped['Group'] = relationship("Group", lazy="joined")
+    bot: Mapped['Bot'] = relationship("Bot", lazy="joined")
+    post_attempts: Mapped[list['PostAttempt']] = relationship("PostAttempt", lazy="joined")
 
     __table_args__ = (
         # Only one active/paused/error post per group (allow history via DONE)
@@ -51,3 +60,7 @@ class Post(Base, TimestampMixin, VersionedMixin, UUIDPkMixin, ModelHelpersMixin)
             unique=True,
         ),
     )
+
+from .post_attempt import PostAttempt  # noqa: E402
+from .bot import Bot  # noqa: E402
+from .group import Group  # noqa: E402

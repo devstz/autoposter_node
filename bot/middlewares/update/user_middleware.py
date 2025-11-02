@@ -20,6 +20,9 @@ class UserMiddleware(BaseMiddleware):
         uow: SQLAlchemyUnitOfWork = data['uow']
         user: User = data['event_from_user']
 
+        if user.is_bot:
+            return
+
         tg_user = await uow.user_repo.get(user.id)
         if tg_user is None:
             tg_user = await uow.user_repo.add(
