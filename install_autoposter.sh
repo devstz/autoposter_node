@@ -108,14 +108,17 @@ fi
 run_check() {
   FILE="$1"
   DESC="$2"
+  TEST_PATH="${INSTALL_DIR}/${FILE}"
 
-  if [ -f "$FILE" ]; then
+  if [ -f "$TEST_PATH" ]; then
     log "▶ Проверка: $DESC"
 
-    # Загружаем .env в окружение перед запуском
-    export $(grep -v '^#' .env | xargs)
-
-    python3 "$FILE" >>"$LOG_FILE" 2>&1 || {
+    # Запуск прямо из папки репозитория и экспорт переменных для Python
+    (
+      cd "${INSTALL_DIR}"
+      export $(grep -v '^#' .env | xargs)
+      ${INSTALL_DIR}/.venv/bin/python "$FILE"
+    ) >>"$LOG_FILE" 2>&1 || {
       log "❌ $DESC — ошибка (см. лог)"
       fail_if_error
     }
@@ -127,9 +130,10 @@ run_check() {
       log "✅ $DESC — успешно"
     fi
   else
-    log "⚠️ Файл $FILE не найден, пропускаем"
+    log "⚠️ Файл $TEST_PATH не найден, пропускаем"
   fi
 }
+
 
 
 run_check "tests/check_db.py" "Проверка базы данных"
