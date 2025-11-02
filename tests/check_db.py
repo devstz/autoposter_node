@@ -1,19 +1,36 @@
+import asyncio
+import ssl
 import os
-import psycopg2
-
-db_url = os.getenv("DATABASE_URL")
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy import text
 
 print("Проверяем подключение к базе...")
 
-try:
-    conn = psycopg2.connect(db_url)
-    cur = conn.cursor()
-    cur.execute("SELECT 1;")
-    print("✅ Подключение к БД успешно!")
-except Exception as e:
-    print(f"❌ Ошибка подключения к БД: {e}")
-finally:
-    if 'cur' in locals():
-        cur.close()
-    if 'conn' in locals():
-        conn.close()
+async def check_database():
+    db_url = os.getenv("DATABASE_URL")
+    if not db_url:
+        print("❌ DATABASE_URL не найден в окружении")
+        return False
+
+    try:
+        ssl_context = ssl.create_default_context()
+        engine = create_async_engine(
+            db_url,
+            echo=False,
+            connect_args={"ssl": ssl_context},
+        )
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1;"))
+            print("✅ Подключение к БД успешно!")
+            await conn.close()
+            await conn.close()
+
+        await engine.dispose()
+        return True
+
+    except Exception as e:
+        print(f"❌ Ошибка подключения к БД: {e}")
+        return False
+
+if __name__ == "__main__":
+    asyncio.run(check_database())
