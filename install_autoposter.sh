@@ -82,6 +82,13 @@ LOG_LEVEL=INFO
 EOF
 check_success "Создание .env"
 
+log "🐍 Проверяем наличие python3-venv..."
+if ! dpkg -s "python${PYTHON_VERSION}-venv" &>/dev/null; then
+  log "Устанавливаем python${PYTHON_VERSION}-venv..."
+  apt install -y python${PYTHON_VERSION}-venv >>"$LOG_FILE" 2>&1 || apt install -y python3-venv >>"$LOG_FILE" 2>&1
+  check_success "Установка python-venv"
+fi
+
 log "🐍 Создаём виртуальное окружение..."
 python3 -m venv .venv >>"$LOG_FILE" 2>&1
 check_success "Создание .venv"
