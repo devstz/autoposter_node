@@ -118,9 +118,9 @@ run_check() {
   fi
 }
 
-run_check "check_db.py" "Проверка базы данных"
-run_check "check_bot.py" "Проверка токена бота"
-run_check "check_dublication_ip.py" "Проверка IP дубликатов"
+run_check "tests/check_db.py" "Проверка базы данных"
+run_check "tests/check_bot.py" "Проверка токена бота"
+run_check "tests/check_dublication_ip.py" "Проверка IP дубликатов"
 
 log "⚙️ Создаём systemd сервис..."
 cat > /etc/systemd/system/$SERVICE_NAME <<EOF
