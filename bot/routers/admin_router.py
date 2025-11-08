@@ -747,7 +747,8 @@ class AdminRouter(BaseRouter):
                 bots = await bot_service.list(limit=1000)
                 bot_entries = [
                     {
-                        "id": str(bot.id),
+                        "id": bot.telegram_id,
+                        "uuid": str(bot.id),
                         "label": ux.admin.format_bot_label(bot),
                     }
                     for bot in bots
@@ -843,15 +844,37 @@ class AdminRouter(BaseRouter):
         ):
             data = await state.get_data()
             selected_ids: list[str] = data.get("dist_selected_bots", [])
+            bot_list: list[dict] = data.get("dist_bot_list", [])
             if not selected_ids:
                 await callback.answer(ux.admin.distribution_bot_selection_empty_text(), show_alert=True)
                 return
             groups_map: dict[str, dict] = {}
-            for bot_id_str in selected_ids:
-                try:
-                    bot_uuid = UUID(bot_id_str)
-                except ValueError:
-                    continue
+            uuid_lookup = {
+                entry["id"]: entry.get("uuid") or entry.get("id")
+                for entry in bot_list
+                if entry.get("id")
+            }
+            resolved_cache: dict[str, UUID] = {}
+            for bot_key in selected_ids:
+                if bot_key in resolved_cache:
+                    bot_uuid = resolved_cache[bot_key]
+                else:
+                    bot_uuid: UUID | None = None
+                    for candidate in (uuid_lookup.get(bot_key), bot_key):
+                        if not candidate:
+                            continue
+                        try:
+                            bot_uuid = UUID(candidate)
+                            break
+                        except ValueError:
+                            continue
+                    if bot_uuid is None:
+                        bot = await bot_service.get_by_telegram_id(bot_key)
+                        if bot:
+                            bot_uuid = bot.id
+                    if bot_uuid is None:
+                        continue
+                    resolved_cache[bot_key] = bot_uuid
                 bot_groups = await group_service.list_by_bot(bot_uuid, limit=1000)
                 bot_groups = await group_service.ensure_metadata_bulk(bot_groups, bot_service)
                 for group in bot_groups:
