@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from html import escape
 from typing import Iterable, Optional
 from uuid import UUID
 
@@ -314,7 +315,7 @@ class AdminUX:
             lines.append(
                 self._distributions_texts.get("result_skipped", "Пропущено: {skipped}.").format(skipped=skipped)
             )
-        errors_list = list(errors)
+        errors_list = [escape(item, quote=False) for item in errors]
         if errors_list:
             lines.append(
                 self._distributions_texts.get("result_errors", "Ошибки:\n{items}").format(items="\n".join(errors_list))
