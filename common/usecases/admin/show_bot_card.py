@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from uuid import UUID
 from typing import Dict
 
-from common.dto import BotCardDTO
+from common.dto import BotCardDTO, BotDTO
 from services import (
     BotService,
     PostService,
@@ -70,6 +70,8 @@ class ShowBotCardUseCase:
         if errors_count > 0:
             metrics_lines.append(self._texts["card_metrics_failures_hint"])
 
+        repo_lines = self._build_repo_lines(bot)
+
         text = "\n".join(
             [
                 self._texts["card_title"].format(name=display_name),
@@ -84,6 +86,9 @@ class ShowBotCardUseCase:
                 "",
                 self._texts["card_metrics_title"],
                 *metrics_lines,
+                "",
+                self._texts["card_repo_title"],
+                *repo_lines,
                 "",
                 self._texts["card_posts_hint"].format(limit=bot.max_posts),
             ]
@@ -118,3 +123,41 @@ class ShowBotCardUseCase:
         if delta <= settings.offline_threshold_s:
             return "warning"
         return "offline"
+
+    def _build_repo_lines(self, bot: BotDTO) -> list[str]:
+        lines: list[str] = []
+        lines.append(self._texts["card_repo_branch"].format(branch=bot.tracked_branch))
+
+        if bot.current_commit_hash:
+            lines.append(
+                self._texts["card_repo_current"].format(
+                    commit=self._short_hash(bot.current_commit_hash)
+                )
+            )
+        else:
+            lines.append(self._texts["card_repo_unknown"])
+
+        if bot.latest_available_commit_hash:
+            lines.append(
+                self._texts["card_repo_latest"].format(
+                    commit=self._short_hash(bot.latest_available_commit_hash)
+                )
+            )
+
+        if bot.commits_behind > 0:
+            lines.append(self._texts["card_repo_updates"].format(count=bot.commits_behind))
+        else:
+            lines.append(self._texts["card_repo_status_ok"])
+
+        lines.append(
+            self._texts["card_repo_checked"].format(
+                value=self._format_datetime(bot.last_update_check_at)
+            )
+        )
+        return lines
+
+    @staticmethod
+    def _short_hash(value: str, length: int = 8) -> str:
+        if len(value) <= length:
+            return value
+        return value[:length]

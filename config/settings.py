@@ -13,6 +13,9 @@ class Config(BaseSettings):
     DATABASE_URL: str = "DATABASE_URL"
     LOG_FILE: Path = Path("output.log")
     LOG_LEVEL: str = "INFO"
+    GIT_REMOTE: str = "origin"
+    GIT_BRANCH: str = "main"
+    GIT_CHECK_INTERVAL_S: int = 300
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

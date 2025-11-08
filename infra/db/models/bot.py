@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import Boolean, ForeignKey, BigInteger, String, Index
+from sqlalchemy import Boolean, ForeignKey, BigInteger, String, Index, Integer
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import expression
 from sqlalchemy import DateTime, text
@@ -29,6 +29,11 @@ class Bot(Base, TimestampMixin, VersionedMixin, UUIDPkMixin, ModelHelpersMixin):
     # Settings snapshot / linkage
     settings_id: Mapped[Optional[UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("settings.id", ondelete="SET NULL"), index=True)
     max_posts: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("10"))
+    tracked_branch: Mapped[str] = mapped_column(String(64), nullable=False, server_default=text("'main'"))
+    current_commit_hash: Mapped[Optional[str]] = mapped_column(String(64))
+    latest_available_commit_hash: Mapped[Optional[str]] = mapped_column(String(64))
+    commits_behind: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    last_update_check_at: Mapped[Optional[DateTime]] = mapped_column(DateTime(timezone=True))
 
     settings: Mapped['Setting'] = relationship("Setting", lazy="joined")
 
