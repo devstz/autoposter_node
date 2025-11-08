@@ -28,7 +28,7 @@ class PostingService:
             )
             return msg
         except Exception as e:
-            logger.error(f"Failed to send post ({post.id}):\n{chat_id=}\n{from_chat_id=}\n{message_id}\nError: {type(e).__name__}: {e}")
+            logger.error(f"Failed to send post ({post.id}):\n{to_chat_id=}\n{from_chat_id=}\n{message_id}\nError: {type(e).__name__}: {e}")
             raise e
     
     async def delete_post_attempt(self, post_attempt: PostAttempt) -> bool:

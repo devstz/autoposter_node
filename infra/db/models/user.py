@@ -3,7 +3,7 @@ from typing import Any, Optional
 
 from sqlalchemy import BigInteger, Boolean, String
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import expression
 from sqlalchemy import text
 
