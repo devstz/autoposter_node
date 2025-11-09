@@ -549,6 +549,62 @@ class AdminRouter(BaseRouter):
             page = callback_data.page or 1
             await self._render_distribution_card(callback, ux, dist_id, page=page)
 
+        @self.callback_query(AdminDistributionsCallback.filter(F.action == AdminDistributionsAction.DELETE))
+        async def dist_delete(
+            callback: CallbackQuery,
+            callback_data: AdminDistributionsCallback,
+            ux: UXContext,
+            post_service: PostService,
+        ):
+            if not callback_data.distribution_id:
+                await callback.answer("Рассылка не найдена", show_alert=True)
+                return
+
+            dist_id = self._decode_distribution_id(callback_data.distribution_id)
+            if dist_id is None:
+                await callback.answer("Рассылка не найдена", show_alert=True)
+                return
+
+            summary = await post_service.get_distribution_summary(dist_id)
+            if summary is None:
+                await callback.answer(ux.admin.distribution_delete_missing_text(), show_alert=True)
+                page = callback_data.page or 1
+                await self._render_distributions_list(callback, ux, page=page)
+                return
+
+            source_message_id = summary.get("source_message_id")
+            if source_message_id is None:
+                await callback.answer("Не удалось определить рассылку", show_alert=True)
+                return
+
+            try:
+                normalized_message_id = int(source_message_id)
+            except (TypeError, ValueError):
+                await callback.answer("Не удалось определить рассылку", show_alert=True)
+                return
+
+            source_channel_id = summary.get("source_channel_id")
+            try:
+                normalized_channel_id = int(source_channel_id) if source_channel_id is not None else None
+            except (TypeError, ValueError):
+                normalized_channel_id = None
+
+            source_username = summary.get("source_channel_username")
+            deleted = await post_service.delete_distribution(
+                source_channel_username=source_username,
+                source_channel_id=normalized_channel_id,
+                source_message_id=normalized_message_id,
+            )
+
+            if deleted == 0:
+                feedback = ux.admin.distribution_delete_missing_text()
+            else:
+                feedback = ux.admin.distribution_deleted_alert_text(summary.get("distribution_name"), deleted)
+
+            await callback.answer(feedback, show_alert=True)
+            page = callback_data.page or 1
+            await self._render_distributions_list(callback, ux, page=page)
+
         @self.callback_query(AdminDistributionsCallback.filter(F.action == AdminDistributionsAction.SHOW_GROUPS))
         async def dist_show_list_groups(
             callback: CallbackQuery,

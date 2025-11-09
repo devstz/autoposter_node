@@ -209,6 +209,8 @@ TEXT = {
         "result_errors": "Не удалось обработать:\n{items}",
         "error_no_groups": "Нет групп для создания рассылки.",
         "cancelled": "Действие отменено.",
+        "deleted_alert": "Рассылка «{name}» удалена. Удалено постов: {count}.",
+        "delete_missing": "Рассылка не найдена или уже удалена.",
         "card_heading": "<b>{name}</b>",
         "card_name_placeholder": "Без названия",
         "card_source_link": "<b>Источник:</b> <a href=\"{link}\">{label}</a>",

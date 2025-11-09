@@ -66,6 +66,7 @@ class AdminDistributionsAction(str, Enum):
     SET_PIN = "set_pin"
     TOGGLE_STATUS = "toggle_status"
     TOGGLE_NOTIFY = "toggle_notify"
+    DELETE = "delete"
     SHOW_GROUPS = "show_groups"
     GROUPS_PAGE = "groups_page"
     GROUP_VIEW = "group_view"

@@ -39,6 +39,7 @@ BUTTONS: Final[dict[str, dict[str, str]]] = {
         "enable_notify": "🔔 Включить уведомления",
         "disable_notify": "🔕 Выключить уведомления",
         "groups": "📋 Список групп",
+        "delete": "🗑 Удалить",
         "back_to_card": "⬅️ К рассылке",
         "back_to_groups": "⬅️ К группам",
     },

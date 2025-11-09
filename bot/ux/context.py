@@ -219,6 +219,20 @@ class AdminUX:
         ]
         return "\n\n".join(filter(None, lines))
 
+    def distribution_deleted_alert_text(self, name: str | None, count: int) -> str:
+        template = self._distributions_texts.get(
+            "deleted_alert",
+            "Рассылка «{name}» удалена. Удалено постов: {count}.",
+        )
+        fallback = self._distributions_texts.get("card_name_placeholder", "Без названия")
+        return template.format(name=name or fallback, count=count)
+
+    def distribution_delete_missing_text(self) -> str:
+        return self._distributions_texts.get(
+            "delete_missing",
+            "Рассылка не найдена или уже удалена.",
+        )
+
     def distribution_target_attempts_invalid_text(self) -> str:
         return self._distributions_texts.get(
             "target_attempts_invalid",

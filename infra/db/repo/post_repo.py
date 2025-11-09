@@ -232,6 +232,27 @@ class SQLAlchemyPostRepository:
         await self.__session.flush()
         return len(res.fetchall())
 
+    async def delete_distribution(
+        self,
+        *,
+        source_channel_username: str | None,
+        source_channel_id: int | None,
+        source_message_id: int,
+    ) -> int:
+        """Delete posts that belong to the same source message (distribution)."""
+        conditions = self._distribution_filters(
+            source_channel_username=source_channel_username,
+            source_channel_id=source_channel_id,
+            source_message_id=source_message_id,
+        )
+        res = await self.__session.execute(
+            sa_delete(Post)
+            .where(and_(*conditions))
+            .returning(Post.id)
+        )
+        await self.__session.flush()
+        return len(res.fetchall())
+
     async def resolve_distribution_id_by_source(
         self,
         *,

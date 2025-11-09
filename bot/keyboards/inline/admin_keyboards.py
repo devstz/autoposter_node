@@ -515,6 +515,16 @@ class AdminInlineKeyboards:
         )
         builder.row(
             InlineKeyboardButton(
+                text=RU_BUTTONS["distributions"]["delete"],
+                callback_data=AdminDistributionsCallback(
+                    action=AdminDistributionsAction.DELETE,
+                    distribution_id=encoded_distribution_id,
+                    page=page,
+                ).pack(),
+            )
+        )
+        builder.row(
+            InlineKeyboardButton(
                 text=RU_BUTTONS["distributions"]["back_to_list"],
                 callback_data=AdminDistributionsCallback(
                     action=AdminDistributionsAction.LIST_BACK,
