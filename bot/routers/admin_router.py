@@ -1103,7 +1103,6 @@ class AdminRouter(BaseRouter):
                 skipped=skipped,
                 errors=errors,
             )
-            print(f'{result_text=}')
             keyboard = AdminInlineKeyboards.build_admin_distributions_menu_keyboard()
             await message.answer(result_text, reply_markup=keyboard)
 

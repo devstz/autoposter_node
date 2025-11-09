@@ -316,10 +316,10 @@ class AdminUX:
                 self._distributions_texts.get("result_skipped", "Пропущено: {skipped}.").format(skipped=skipped)
             )
         errors_list = [escape(item, quote=False) for item in errors]
-        if errors_list:
+        '''if errors_list:
             lines.append(
                 self._distributions_texts.get("result_errors", "Ошибки:\n{items}").format(items="\n".join(errors_list))
-            )
+            )'''
         return "\n\n".join(lines)
 
     def format_bot_label(self, bot: BotDTO | None) -> str:
