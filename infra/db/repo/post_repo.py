@@ -46,6 +46,17 @@ class SQLAlchemyPostRepository:
         target_attempts: int = 1,
         notify_on_failure: bool = True,
     ) -> Post:
+        # Ensure we don't violate uq_posts_group_source when admin repeats the same source
+        await self.__session.execute(
+            sa_delete(Post).where(
+                and_(
+                    Post.group_id == group_id,
+                    Post.source_channel_username == source_channel_username,
+                    Post.source_message_id == source_message_id,
+                )
+            )
+        )
+        await self.__session.flush()
         obj = Post(
             group_id=group_id,
             bot_id=bot_id if bot_id else None,
