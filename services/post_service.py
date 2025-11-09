@@ -14,7 +14,7 @@ class PostService:
     async def get(self, post_id: UUID) -> Optional[PostDTO]:
         async with self._uow:
             post = await self._uow.post_repo.get(post_id)
-            return PostDTO.from_model(post) if post else None
+        return PostDTO.from_model(post) if post else None
 
     async def get_by_source(
         self,
