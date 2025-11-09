@@ -16,7 +16,7 @@ class User(Base, TimestampMixin, VersionedMixin, ModelHelpersMixin):
     username: Mapped[Optional[str]] = mapped_column(
         String(50),
         unique=True,
-        nullable=False,
+        nullable=True,
         index=True,
     )
 
@@ -33,4 +33,3 @@ class User(Base, TimestampMixin, VersionedMixin, ModelHelpersMixin):
         nullable=True,
         server_default=text("'{}'::jsonb"),
     )
-
