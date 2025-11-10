@@ -10,8 +10,12 @@ from datetime import datetime, timezone, timedelta
 
 from services.post_service import PostService
 from services.post_attempt_service import PostAttemptService
+from services.group_service import GroupService
+from services.user_service import UserService
+from services.notification_service import NotificationService
 
 from common.enums.post_status import PostStatus
+from common.enums.telegram_error import classify_telegram_error, is_critical_error
 
 from infra.db.models import Bot as BotDB, Post, PostAttempt
 
@@ -30,6 +34,7 @@ class PostingRunner:
     def __init__(self, token: str) -> None:
         self.tg_bot: Bot = create_bot(token)
         self.posting_service = PostingService(self.tg_bot)
+        self.notification_service = NotificationService(self.tg_bot)
         self.sleep_interval = SLEEP_INTERVAL_SECONDS
         self.running = True
 
@@ -134,6 +139,10 @@ class PostingRunner:
             if post.target_attempts >= 0 and post.count_attempts >= post.target_attempts:
                 post.status = PostStatus.DONE.value
         except Exception as e:
+            # Классифицируем ошибку
+            error_type = classify_telegram_error(e)
+            is_critical = is_critical_error(error_type)
+            
             # Записываем неудачную попытку и отмечаем пост как ошибочный
             try:
                 async with get_uow() as uow:
@@ -154,4 +163,62 @@ class PostingRunner:
                     await post_service.mark_error(post.id, f"{type(e).__name__}: {e}")
             except Exception as inner:
                 logger.error(f"Failed to record error for post {post.id}: {inner}")
+            
             logger.error(f"Error processing post {post.id} for bot {bot.id}: {e}")
+            
+            # Обработка критических ошибок (удаление группы, нотификация)
+            if is_critical and post.notify_on_failure:
+                try:
+                    await self._handle_critical_error(bot, post, error_type, str(e))
+                except Exception as critical_error:
+                    logger.error(f"Failed to handle critical error for post {post.id}: {critical_error}")
+    
+    async def _handle_critical_error(
+        self,
+        bot: BotDB,
+        post: Post,
+        error_type,
+        error_message: str,
+    ) -> None:
+        """
+        Обрабатывает критические ошибки: уведомляет админов и удаляет группу
+        
+        Args:
+            bot: Модель бота
+            post: Модель поста
+            error_type: Тип ошибки Telegram
+            error_message: Текст ошибки
+        """
+        async with get_uow() as uow:
+            # Получаем список админов (superuser)
+            user_service = UserService(uow.user_repo)
+            admins = await user_service.search(is_superuser=True, limit=100)
+            admin_ids = [admin.user_id for admin in admins]
+            
+            if not admin_ids:
+                logger.warning("No admins found to notify about critical error")
+                return
+            
+            # Получаем информацию о группе
+            group_service = GroupService(uow.group_repo)
+            group = await group_service.get(post.group_id)
+            
+            if group is None:
+                logger.warning(f"Group {post.group_id} not found for notification")
+                return
+            
+            # Отправляем уведомления админам
+            await self.notification_service.notify_group_failure(
+                bot=bot,
+                group=group,
+                post=post,
+                error_type=error_type,
+                error_message=error_message,
+                admin_ids=admin_ids,
+            )
+            
+            # Удаляем группу из системы
+            await group_service.delete(post.group_id)
+            logger.info(
+                f"Group {post.group_id} ({group.title}) deleted due to critical error: {error_type.value}"
+            )
