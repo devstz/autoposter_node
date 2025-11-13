@@ -18,6 +18,7 @@ from common.enums.post_status import PostStatus
 from common.enums.telegram_error import classify_telegram_error, is_critical_error
 
 from infra.db.models import Bot as BotDB, Post, PostAttempt
+from sqlalchemy.exc import IntegrityError
 
 from .posting_service import PostingService
 
@@ -119,18 +120,27 @@ class PostingRunner:
             tg_msg = await self.posting_service.send_post(post)
 
             # Записываем успешную попытку в БД
-            async with get_uow() as uow:
-                post_attempt_service = PostAttemptService(uow=uow)
+            try:
+                async with get_uow() as uow:
+                    post_attempt_service = PostAttemptService(uow=uow)
 
-                await post_attempt_service.add(PostAttempt(
-                    post_id=post.id,
-                    bot_id=bot.id,
-                    group_id=post.group_id,
-                    chat_id=post.target_chat_id,
-                    message_id=tg_msg.message_id,
-                    deleted=False,
-                    success=True,
-                ))
+                    await post_attempt_service.add(PostAttempt(
+                        post_id=post.id,
+                        bot_id=bot.id,
+                        group_id=post.group_id,
+                        chat_id=post.target_chat_id,
+                        message_id=tg_msg.message_id,
+                        deleted=False,
+                        success=True,
+                    ))
+            except IntegrityError as e:
+                # Если пост был удален между отправкой и записью попытки, логируем предупреждение
+                error_str = str(e).lower()
+                if "foreign key constraint" in error_str and "post_id" in error_str:
+                    logger.warning(f"Post {post.id} was deleted before recording success attempt. Skipping.")
+                    return
+                # Если это другая IntegrityError, пробрасываем дальше
+                raise
             
             # Обновляем счетчики и статус
             post.count_attempts += 1
@@ -161,6 +171,14 @@ class PostingRunner:
                         error_msg=str(e),
                     ))
                     await post_service.mark_error(post.id, f"{type(e).__name__}: {e}")
+            except IntegrityError as inner:
+                # Если пост был удален между обработкой ошибки и записью попытки, логируем предупреждение
+                error_str = str(inner).lower()
+                if "foreign key constraint" in error_str and "post_id" in error_str:
+                    logger.warning(f"Post {post.id} was deleted before recording error attempt. Skipping.")
+                    return
+                # Если это другая IntegrityError, логируем как ошибку
+                logger.error(f"Failed to record error for post {post.id}: {inner}")
             except Exception as inner:
                 logger.error(f"Failed to record error for post {post.id}: {inner}")
             

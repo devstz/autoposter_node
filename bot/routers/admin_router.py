@@ -1204,7 +1204,17 @@ class AdminRouter(BaseRouter):
             logger.error(f"Error rendering distribution card: {e}")
             if isinstance(event, CallbackQuery):
                 await event.answer("Рассылка не найдена", show_alert=True)
+            # Возвращаем пользователя к списку рассылок
+            await self._render_distributions_list(event, ux, page=page or 1)
             return
+        except Exception as e:
+            logger.error(f"Unexpected error rendering distribution card: {e}", exc_info=True)
+            if isinstance(event, CallbackQuery):
+                await event.answer("Произошла ошибка при загрузке карточки", show_alert=True)
+            # Возвращаем пользователя к списку рассылок
+            await self._render_distributions_list(event, ux, page=page or 1)
+            return
+            
         keyboard = AdminInlineKeyboards.build_admin_distribution_card_keyboard(card, page=page)
         
         await edit_message(event, card.text, reply_markup=keyboard)
