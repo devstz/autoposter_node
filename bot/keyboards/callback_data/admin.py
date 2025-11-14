@@ -48,6 +48,6 @@ class AdminDistributionsCallback(CallbackData, prefix="adm_dist"):
     page: int | None = None
     distribution_id: str | None = None
     choice: str | None = None
-    group_id: str | None = None
+    group_id: str | None = None  # encoded identifier
     post_id: str | None = None
     card_page: int | None = None

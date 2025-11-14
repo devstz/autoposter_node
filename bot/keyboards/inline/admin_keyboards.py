@@ -35,6 +35,10 @@ from common.enums import (
 )
 from bot.locales import RU_BUTTONS
 
+
+def _encode_uuid(value: UUID) -> str:
+    return str(base64.urlsafe_b64encode(value.bytes).rstrip(b"=").decode())
+
 class AdminInlineKeyboards:
     @staticmethod
     def build_admin_menu_keyboard(menu_view: MenuViewDTO) -> InlineKeyboardMarkup:
@@ -641,7 +645,7 @@ class AdminInlineKeyboards:
         anchor_post_id: UUID | None,
     ) -> InlineKeyboardMarkup:
         builder = InlineKeyboardBuilder()
-        encoded_distribution_id = str(base64.urlsafe_b64encode(distribution_id.bytes).rstrip(b'=').decode())
+        encoded_distribution_id = _encode_uuid(distribution_id)
         encoded_anchor_post_id = (
             str(base64.urlsafe_b64encode(anchor_post_id.bytes).rstrip(b'=').decode())
             if anchor_post_id is not None
@@ -756,7 +760,7 @@ class AdminInlineKeyboards:
         card_page: int,
     ) -> InlineKeyboardMarkup:
         builder = InlineKeyboardBuilder()
-        encoded_distribution_id = str(base64.urlsafe_b64encode(distribution_id.bytes).rstrip(b'=').decode())
+        encoded_distribution_id = _encode_uuid(distribution_id)
         builder.row(
             InlineKeyboardButton(
                 text=RU_BUTTONS["distributions"]["groups_add_manual"],
@@ -800,7 +804,7 @@ class AdminInlineKeyboards:
         card_page: int,
     ) -> InlineKeyboardMarkup:
         builder = InlineKeyboardBuilder()
-        encoded_distribution_id = str(base64.urlsafe_b64encode(distribution_id.bytes).rstrip(b'=').decode())
+        encoded_distribution_id = _encode_uuid(distribution_id)
         builder.row(
             InlineKeyboardButton(
                 text=RU_BUTTONS["distributions"]["groups_add_cancel"],
@@ -825,9 +829,13 @@ class AdminInlineKeyboards:
         card_page: int,
     ) -> InlineKeyboardMarkup:
         builder = InlineKeyboardBuilder()
-        encoded_distribution_id = str(base64.urlsafe_b64encode(distribution_id.bytes).rstrip(b'=').decode())
+        encoded_distribution_id = _encode_uuid(distribution_id)
 
         for group_id, label, selected in items:
+            try:
+                encoded_group_id = _encode_uuid(UUID(group_id))
+            except ValueError:
+                continue
             prefix = "✅ " if selected else "▫️ "
             builder.row(
                 InlineKeyboardButton(
@@ -835,7 +843,7 @@ class AdminInlineKeyboards:
                     callback_data=AdminDistributionsCallback(
                         action=AdminDistributionsAction.GROUPS_ADD_TOGGLE,
                         distribution_id=encoded_distribution_id,
-                        group_id=group_id,
+                        group_id=encoded_group_id,
                         page=page,
                         card_page=card_page,
                     ).pack(),
@@ -912,18 +920,22 @@ class AdminInlineKeyboards:
         selected_ids: set[str],
     ) -> InlineKeyboardMarkup:
         builder = InlineKeyboardBuilder()
-        encoded_distribution_id = str(base64.urlsafe_b64encode(distribution_id.bytes).rstrip(b'=').decode())
+        encoded_distribution_id = _encode_uuid(distribution_id)
 
         for item in view.items:
             group_id = str(item.group_id)
             prefix = "✅ " if group_id in selected_ids else "▫️ "
+            try:
+                encoded_group_id = _encode_uuid(item.group_id)
+            except Exception:
+                continue
             builder.row(
                 InlineKeyboardButton(
                     text=f"{prefix}{item.label}",
                     callback_data=AdminDistributionsCallback(
                         action=AdminDistributionsAction.GROUPS_DELETE_TOGGLE,
                         distribution_id=encoded_distribution_id,
-                        group_id=group_id,
+                        group_id=encoded_group_id,
                         page=view.page,
                         card_page=card_page,
                     ).pack(),
@@ -999,7 +1011,7 @@ class AdminInlineKeyboards:
         card_page: int,
     ) -> InlineKeyboardMarkup:
         builder = InlineKeyboardBuilder()
-        encoded_distribution_id = str(base64.urlsafe_b64encode(distribution_id.bytes).rstrip(b'=').decode())
+        encoded_distribution_id = _encode_uuid(distribution_id)
         builder.row(
             InlineKeyboardButton(
                 text=RU_BUTTONS["confirm"]["yes"],

@@ -812,12 +812,17 @@ class AdminRouter(BaseRouter):
             if dist_id is None or not callback_data.group_id:
                 await callback.answer("Группа не найдена", show_alert=True)
                 return
+            group_uuid = self._decode_group_id(callback_data.group_id)
+            if group_uuid is None:
+                await callback.answer("Группа не найдена", show_alert=True)
+                return
             data = await state.get_data()
             selected: set[str] = set(data.get("dist_edit_bindings_selected", []))
-            if callback_data.group_id in selected:
-                selected.remove(callback_data.group_id)
+            key = str(group_uuid)
+            if key in selected:
+                selected.remove(key)
             else:
-                selected.add(callback_data.group_id)
+                selected.add(key)
             await state.update_data(dist_edit_bindings_selected=list(selected))
             page = callback_data.page or data.get("dist_edit_bindings_page", 1) or 1
             await self._render_bindings_selection(
@@ -835,6 +840,7 @@ class AdminRouter(BaseRouter):
             state: FSMContext,
             ux: UXContext,
             group_service: GroupService,
+            bot_service: BotService,
             post_service: PostService,
         ):
             dist_id = await self._resolve_distribution_id_from_callback(callback_data, post_service)
@@ -855,6 +861,7 @@ class AdminRouter(BaseRouter):
                 group = await group_service.get(group_uuid)
                 if not group:
                     continue
+                group = await group_service.ensure_metadata(group, bot_service)
                 groups.append(group)
             if not groups:
                 await callback.answer(ux.admin.distribution_groups_add_not_found_text(), show_alert=True)
@@ -988,12 +995,17 @@ class AdminRouter(BaseRouter):
             if dist_id is None or not callback_data.group_id:
                 await callback.answer("Группа не найдена", show_alert=True)
                 return
+            group_uuid = self._decode_group_id(callback_data.group_id)
+            if group_uuid is None:
+                await callback.answer("Группа не найдена", show_alert=True)
+                return
             data = await state.get_data()
             selection: set[str] = set(data.get("dist_delete_selection", []))
-            if callback_data.group_id in selection:
-                selection.remove(callback_data.group_id)
+            key = str(group_uuid)
+            if key in selection:
+                selection.remove(key)
             else:
-                selection.add(callback_data.group_id)
+                selection.add(key)
             await state.update_data(dist_delete_selection=list(selection))
             page = callback_data.page or data.get("dist_edit_groups_page", 1) or 1
             card_page = data.get("dist_edit_card_page", callback_data.card_page or 1) or 1
@@ -1050,7 +1062,7 @@ class AdminRouter(BaseRouter):
             card_page = callback_data.card_page or data.get("dist_edit_card_page", 1) or 1
             choice = (callback_data.choice or "").lower()
             if choice == "yes":
-                group_ids = []
+                group_ids: list[UUID] = []
                 for raw_id in selection:
                     try:
                         group_ids.append(UUID(raw_id))
@@ -1749,7 +1761,7 @@ class AdminRouter(BaseRouter):
             title = group.title or (group.username and f"@{group.username}") or str(group.tg_chat_id)
             items.append(
                 {
-                    "id": group_id_str,
+                    "uuid": group_id_str,
                     "title": title,
                     "chat_id": group.tg_chat_id,
                     "status": status,
@@ -1793,8 +1805,9 @@ class AdminRouter(BaseRouter):
             status_icon = "🟢" if item.get("status") == "free" else "🟠"
             title = item.get("title") or "—"
             chat_id = item.get("chat_id")
+            chat_id_str = str(chat_id)
             label = f"{status_icon} {title} • {chat_id}"
-            rows.append((item["id"], label, item["id"] in selected))
+            rows.append((chat_id_str, label, chat_id_str in selected))
         keyboard = AdminInlineKeyboards.build_admin_distribution_groups_bindings_keyboard(
             rows,
             distribution_id=distribution_id,
@@ -2026,16 +2039,18 @@ class AdminRouter(BaseRouter):
         return datetime.now().strftime("Рассылка %d.%m %H:%M")
 
     def _decode_distribution_id(self, value: str) -> UUID | None:
-        # во входящих колбэках оно у тебя в base64 urlsafe. тут же и декодим
-        try:
-            return UUID(bytes=base64.urlsafe_b64decode(value + "=="))
-        except ValueError as e:
-            logger.error(f"Error decoding distribution ID: {e}")
-            return None
+        return self._decode_uuid_token(value, "distribution")
 
     def _decode_post_id(self, value: str) -> UUID | None:
+        return self._decode_uuid_token(value, "post")
+
+    def _decode_group_id(self, value: str) -> UUID | None:
+        return self._decode_uuid_token(value, "group")
+
+    def _decode_uuid_token(self, value: str, label: str) -> UUID | None:
         try:
-            return UUID(bytes=base64.urlsafe_b64decode(value + "=="))
-        except ValueError as e:
-            logger.error(f"Error decoding post ID: {e}")
+            padded = value + "=" * (-len(value) % 4)
+            return UUID(bytes=base64.urlsafe_b64decode(padded.encode()))
+        except (ValueError, TypeError) as exc:
+            logger.error("Error decoding %s ID: %s", label, exc)
             return None

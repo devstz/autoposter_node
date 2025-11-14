@@ -112,6 +112,7 @@ class ShowDistributionGroupsUseCase:
             post_id=post.id,
             group_id=post.group_id,
             label=label,
+            chat_id=chat_id,
             status=post.status,
         )
 

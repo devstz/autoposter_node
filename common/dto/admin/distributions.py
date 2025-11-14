@@ -53,6 +53,7 @@ class DistributionCardDTO:
 class DistributionGroupListItemDTO:
     post_id: UUID
     group_id: UUID
+    chat_id: int
     label: str
     status: str
 
