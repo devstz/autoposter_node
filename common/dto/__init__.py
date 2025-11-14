@@ -24,6 +24,7 @@ from .admin.distributions import (
     DistributionGroupListItemDTO,
     DistributionGroupsViewDTO,
     DistributionGroupCardDTO,
+    DistributionContextDTO,
 )
 
 __all__ = [
@@ -57,4 +58,5 @@ __all__ = [
     "DistributionGroupListItemDTO",
     "DistributionGroupsViewDTO",
     "DistributionGroupCardDTO",
+    "DistributionContextDTO",
 ]

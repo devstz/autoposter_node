@@ -662,6 +662,27 @@ class AdminInlineKeyboards:
                 )
             )
 
+        builder.row(
+            InlineKeyboardButton(
+                text=RU_BUTTONS["distributions"]["groups_add"],
+                callback_data=AdminDistributionsCallback(
+                    action=AdminDistributionsAction.GROUPS_ADD,
+                    distribution_id=encoded_distribution_id,
+                    page=view.page,
+                    card_page=card_page,
+                ).pack(),
+            ),
+            InlineKeyboardButton(
+                text=RU_BUTTONS["distributions"]["groups_delete"],
+                callback_data=AdminDistributionsCallback(
+                    action=AdminDistributionsAction.GROUPS_DELETE,
+                    distribution_id=encoded_distribution_id,
+                    page=view.page,
+                    card_page=card_page,
+                ).pack(),
+            ),
+        )
+
         if view.total_pages > 1 and encoded_anchor_post_id is not None:
             controls: list[InlineKeyboardButton] = []
             if view.page > 1:
@@ -725,6 +746,282 @@ class AdminInlineKeyboards:
             )
         )
 
+        return builder.as_markup()
+
+    @staticmethod
+    def build_admin_distribution_groups_add_method_keyboard(
+        *,
+        distribution_id: UUID,
+        groups_page: int,
+        card_page: int,
+    ) -> InlineKeyboardMarkup:
+        builder = InlineKeyboardBuilder()
+        encoded_distribution_id = str(base64.urlsafe_b64encode(distribution_id.bytes).rstrip(b'=').decode())
+        builder.row(
+            InlineKeyboardButton(
+                text=RU_BUTTONS["distributions"]["groups_add_manual"],
+                callback_data=AdminDistributionsCallback(
+                    action=AdminDistributionsAction.GROUPS_ADD_MANUAL,
+                    distribution_id=encoded_distribution_id,
+                    page=groups_page,
+                    card_page=card_page,
+                ).pack(),
+            )
+        )
+        builder.row(
+            InlineKeyboardButton(
+                text=RU_BUTTONS["distributions"]["groups_add_bindings"],
+                callback_data=AdminDistributionsCallback(
+                    action=AdminDistributionsAction.GROUPS_ADD_BINDINGS,
+                    distribution_id=encoded_distribution_id,
+                    page=1,
+                    card_page=card_page,
+                ).pack(),
+            )
+        )
+        builder.row(
+            InlineKeyboardButton(
+                text=RU_BUTTONS["distributions"]["back_to_groups"],
+                callback_data=AdminDistributionsCallback(
+                    action=AdminDistributionsAction.SHOW_GROUPS,
+                    distribution_id=encoded_distribution_id,
+                    page=groups_page,
+                    card_page=card_page,
+                ).pack(),
+            )
+        )
+        return builder.as_markup()
+
+    @staticmethod
+    def build_admin_distribution_groups_add_manual_keyboard(
+        *,
+        distribution_id: UUID,
+        groups_page: int,
+        card_page: int,
+    ) -> InlineKeyboardMarkup:
+        builder = InlineKeyboardBuilder()
+        encoded_distribution_id = str(base64.urlsafe_b64encode(distribution_id.bytes).rstrip(b'=').decode())
+        builder.row(
+            InlineKeyboardButton(
+                text=RU_BUTTONS["distributions"]["groups_add_cancel"],
+                callback_data=AdminDistributionsCallback(
+                    action=AdminDistributionsAction.GROUPS_ADD_CANCEL,
+                    distribution_id=encoded_distribution_id,
+                    page=groups_page,
+                    card_page=card_page,
+                ).pack(),
+            )
+        )
+        return builder.as_markup()
+
+    @staticmethod
+    def build_admin_distribution_groups_bindings_keyboard(
+        items: list[tuple[str, str, bool]],
+        *,
+        distribution_id: UUID,
+        page: int,
+        total_pages: int,
+        groups_page: int,
+        card_page: int,
+    ) -> InlineKeyboardMarkup:
+        builder = InlineKeyboardBuilder()
+        encoded_distribution_id = str(base64.urlsafe_b64encode(distribution_id.bytes).rstrip(b'=').decode())
+
+        for group_id, label, selected in items:
+            prefix = "✅ " if selected else "▫️ "
+            builder.row(
+                InlineKeyboardButton(
+                    text=f"{prefix}{label}",
+                    callback_data=AdminDistributionsCallback(
+                        action=AdminDistributionsAction.GROUPS_ADD_TOGGLE,
+                        distribution_id=encoded_distribution_id,
+                        group_id=group_id,
+                        page=page,
+                        card_page=card_page,
+                    ).pack(),
+                )
+            )
+
+        if total_pages > 1:
+            controls: list[InlineKeyboardButton] = []
+            if page > 1:
+                controls.append(
+                    InlineKeyboardButton(
+                        text=RU_BUTTONS["pagination"]["prev"],
+                        callback_data=AdminDistributionsCallback(
+                            action=AdminDistributionsAction.GROUPS_ADD_BINDINGS_PAGE,
+                            distribution_id=encoded_distribution_id,
+                            page=page - 1,
+                            card_page=card_page,
+                        ).pack(),
+                    )
+                )
+            controls.append(
+                InlineKeyboardButton(
+                    text=RU_BUTTONS["pagination"]["indicator"].format(current=page, total=total_pages),
+                    callback_data=AdminDistributionsCallback(
+                        action=AdminDistributionsAction.GROUPS_ADD_BINDINGS_PAGE,
+                        distribution_id=encoded_distribution_id,
+                        page=page,
+                        card_page=card_page,
+                    ).pack(),
+                )
+            )
+            if page < total_pages:
+                controls.append(
+                    InlineKeyboardButton(
+                        text=RU_BUTTONS["pagination"]["next"],
+                        callback_data=AdminDistributionsCallback(
+                            action=AdminDistributionsAction.GROUPS_ADD_BINDINGS_PAGE,
+                            distribution_id=encoded_distribution_id,
+                            page=page + 1,
+                            card_page=card_page,
+                        ).pack(),
+                    )
+                )
+            builder.row(*controls)
+
+        builder.row(
+            InlineKeyboardButton(
+                text=RU_BUTTONS["distributions"]["groups_add_apply"],
+                callback_data=AdminDistributionsCallback(
+                    action=AdminDistributionsAction.GROUPS_ADD_APPLY,
+                    distribution_id=encoded_distribution_id,
+                    page=page,
+                    card_page=card_page,
+                ).pack(),
+            ),
+            InlineKeyboardButton(
+                text=RU_BUTTONS["distributions"]["groups_add_cancel"],
+                callback_data=AdminDistributionsCallback(
+                    action=AdminDistributionsAction.GROUPS_ADD_CANCEL,
+                    distribution_id=encoded_distribution_id,
+                    page=groups_page,
+                    card_page=card_page,
+                ).pack(),
+            ),
+        )
+        return builder.as_markup()
+
+    @staticmethod
+    def build_admin_distribution_groups_delete_keyboard(
+        view: DistributionGroupsViewDTO,
+        *,
+        distribution_id: UUID,
+        card_page: int,
+        selected_ids: set[str],
+    ) -> InlineKeyboardMarkup:
+        builder = InlineKeyboardBuilder()
+        encoded_distribution_id = str(base64.urlsafe_b64encode(distribution_id.bytes).rstrip(b'=').decode())
+
+        for item in view.items:
+            group_id = str(item.group_id)
+            prefix = "✅ " if group_id in selected_ids else "▫️ "
+            builder.row(
+                InlineKeyboardButton(
+                    text=f"{prefix}{item.label}",
+                    callback_data=AdminDistributionsCallback(
+                        action=AdminDistributionsAction.GROUPS_DELETE_TOGGLE,
+                        distribution_id=encoded_distribution_id,
+                        group_id=group_id,
+                        page=view.page,
+                        card_page=card_page,
+                    ).pack(),
+                )
+            )
+
+        if view.total_pages > 1:
+            controls: list[InlineKeyboardButton] = []
+            if view.page > 1:
+                controls.append(
+                    InlineKeyboardButton(
+                        text=RU_BUTTONS["pagination"]["prev"],
+                        callback_data=AdminDistributionsCallback(
+                            action=AdminDistributionsAction.GROUPS_DELETE_PAGE,
+                            distribution_id=encoded_distribution_id,
+                            page=view.page - 1,
+                            card_page=card_page,
+                        ).pack(),
+                    )
+                )
+            controls.append(
+                InlineKeyboardButton(
+                    text=RU_BUTTONS["pagination"]["indicator"].format(current=view.page, total=view.total_pages),
+                    callback_data=AdminDistributionsCallback(
+                        action=AdminDistributionsAction.GROUPS_DELETE_PAGE,
+                        distribution_id=encoded_distribution_id,
+                        page=view.page,
+                        card_page=card_page,
+                    ).pack(),
+                )
+            )
+            if view.page < view.total_pages:
+                controls.append(
+                    InlineKeyboardButton(
+                        text=RU_BUTTONS["pagination"]["next"],
+                        callback_data=AdminDistributionsCallback(
+                            action=AdminDistributionsAction.GROUPS_DELETE_PAGE,
+                            distribution_id=encoded_distribution_id,
+                            page=view.page + 1,
+                            card_page=card_page,
+                        ).pack(),
+                    )
+                )
+            builder.row(*controls)
+
+        builder.row(
+            InlineKeyboardButton(
+                text=RU_BUTTONS["distributions"]["groups_delete_cancel"],
+                callback_data=AdminDistributionsCallback(
+                    action=AdminDistributionsAction.GROUPS_DELETE_CANCEL,
+                    distribution_id=encoded_distribution_id,
+                    page=view.page,
+                    card_page=card_page,
+                ).pack(),
+            ),
+            InlineKeyboardButton(
+                text=RU_BUTTONS["distributions"]["groups_delete_apply"],
+                callback_data=AdminDistributionsCallback(
+                    action=AdminDistributionsAction.GROUPS_DELETE_CONFIRM,
+                    distribution_id=encoded_distribution_id,
+                    page=view.page,
+                    card_page=card_page,
+                ).pack(),
+            ),
+        )
+        return builder.as_markup()
+
+    @staticmethod
+    def build_admin_distribution_groups_delete_confirm_keyboard(
+        *,
+        distribution_id: UUID,
+        page: int,
+        card_page: int,
+    ) -> InlineKeyboardMarkup:
+        builder = InlineKeyboardBuilder()
+        encoded_distribution_id = str(base64.urlsafe_b64encode(distribution_id.bytes).rstrip(b'=').decode())
+        builder.row(
+            InlineKeyboardButton(
+                text=RU_BUTTONS["confirm"]["yes"],
+                callback_data=AdminDistributionsCallback(
+                    action=AdminDistributionsAction.GROUPS_DELETE_CONFIRM,
+                    distribution_id=encoded_distribution_id,
+                    page=page,
+                    card_page=card_page,
+                    choice="yes",
+                ).pack(),
+            ),
+            InlineKeyboardButton(
+                text=RU_BUTTONS["confirm"]["no"],
+                callback_data=AdminDistributionsCallback(
+                    action=AdminDistributionsAction.GROUPS_DELETE_CONFIRM,
+                    distribution_id=encoded_distribution_id,
+                    page=page,
+                    card_page=card_page,
+                    choice="no",
+                ).pack(),
+            ),
+        )
         return builder.as_markup()
 
     @staticmethod

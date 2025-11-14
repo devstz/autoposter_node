@@ -32,7 +32,7 @@ AdminBotFreeMode,
 AdminGroupsAction,
 AdminDistributionsAction,
 )
-from common.dto import BotDTO
+from common.dto import BotDTO, GroupDTO
 from .helper import edit_message
 from bot.states.admin.admin_states import AdminStates
 from services import BotService, GroupService, PostService
@@ -714,6 +714,377 @@ class AdminRouter(BaseRouter):
             )
             await edit_message(callback, card.text, reply_markup=keyboard)
 
+        @self.callback_query(AdminDistributionsCallback.filter(F.action == AdminDistributionsAction.GROUPS_ADD))
+        async def dist_groups_add_menu(
+            callback: CallbackQuery,
+            callback_data: AdminDistributionsCallback,
+            state: FSMContext,
+            ux: UXContext,
+            post_service: PostService,
+        ):
+            dist_id = await self._resolve_distribution_id_from_callback(callback_data, post_service)
+            if dist_id is None:
+                await callback.answer("Рассылка не найдена", show_alert=True)
+                return
+            groups_page = callback_data.page or 1
+            card_page = callback_data.card_page or 1
+            await state.update_data(
+                dist_edit_distribution=str(dist_id),
+                dist_edit_groups_page=groups_page,
+                dist_edit_card_page=card_page,
+                dist_edit_bindings_selected=[],
+            )
+            keyboard = AdminInlineKeyboards.build_admin_distribution_groups_add_method_keyboard(
+                distribution_id=dist_id,
+                groups_page=groups_page,
+                card_page=card_page,
+            )
+            await edit_message(callback, ux.admin.distribution_groups_add_intro_text(), reply_markup=keyboard)
+
+        @self.callback_query(AdminDistributionsCallback.filter(F.action == AdminDistributionsAction.GROUPS_ADD_MANUAL))
+        async def dist_groups_add_manual(
+            callback: CallbackQuery,
+            callback_data: AdminDistributionsCallback,
+            state: FSMContext,
+            ux: UXContext,
+            post_service: PostService,
+        ):
+            dist_id = await self._resolve_distribution_id_from_callback(callback_data, post_service)
+            if dist_id is None:
+                await callback.answer("Рассылка не найдена", show_alert=True)
+                return
+            groups_page = callback_data.page or 1
+            card_page = callback_data.card_page or 1
+            await state.clear()
+            await state.update_data(
+                dist_edit_distribution=str(dist_id),
+                dist_edit_groups_page=groups_page,
+                dist_edit_card_page=card_page,
+            )
+            await state.set_state(AdminStates.DISTRIBUTION_EDIT_WAIT_GROUP_IDS)
+            keyboard = AdminInlineKeyboards.build_admin_distribution_groups_add_manual_keyboard(
+                distribution_id=dist_id,
+                groups_page=groups_page,
+                card_page=card_page,
+            )
+            await edit_message(callback, ux.admin.distribution_groups_add_manual_prompt_text(), reply_markup=keyboard)
+
+        @self.callback_query(
+            AdminDistributionsCallback.filter(
+                F.action.in_({
+                    AdminDistributionsAction.GROUPS_ADD_BINDINGS,
+                    AdminDistributionsAction.GROUPS_ADD_BINDINGS_PAGE,
+                })
+            )
+        )
+        async def dist_groups_add_bindings(
+            callback: CallbackQuery,
+            callback_data: AdminDistributionsCallback,
+            state: FSMContext,
+            ux: UXContext,
+            group_service: GroupService,
+            bot_service: BotService,
+            post_service: PostService,
+        ):
+            dist_id = await self._resolve_distribution_id_from_callback(callback_data, post_service)
+            if dist_id is None:
+                await callback.answer("Рассылка не найдена", show_alert=True)
+                return
+            desired_page = callback_data.page or 1
+            await self._prepare_bindings_pool(state, dist_id, group_service, bot_service, post_service, ux)
+            await self._render_bindings_selection(
+                callback,
+                ux,
+                state,
+                distribution_id=dist_id,
+                page=desired_page,
+            )
+
+        @self.callback_query(AdminDistributionsCallback.filter(F.action == AdminDistributionsAction.GROUPS_ADD_TOGGLE))
+        async def dist_groups_add_toggle(
+            callback: CallbackQuery,
+            callback_data: AdminDistributionsCallback,
+            state: FSMContext,
+            ux: UXContext,
+            post_service: PostService,
+        ):
+            dist_id = await self._resolve_distribution_id_from_callback(callback_data, post_service)
+            if dist_id is None or not callback_data.group_id:
+                await callback.answer("Группа не найдена", show_alert=True)
+                return
+            data = await state.get_data()
+            selected: set[str] = set(data.get("dist_edit_bindings_selected", []))
+            if callback_data.group_id in selected:
+                selected.remove(callback_data.group_id)
+            else:
+                selected.add(callback_data.group_id)
+            await state.update_data(dist_edit_bindings_selected=list(selected))
+            page = callback_data.page or data.get("dist_edit_bindings_page", 1) or 1
+            await self._render_bindings_selection(
+                callback,
+                ux,
+                state,
+                distribution_id=dist_id,
+                page=page,
+            )
+
+        @self.callback_query(AdminDistributionsCallback.filter(F.action == AdminDistributionsAction.GROUPS_ADD_APPLY))
+        async def dist_groups_add_apply(
+            callback: CallbackQuery,
+            callback_data: AdminDistributionsCallback,
+            state: FSMContext,
+            ux: UXContext,
+            group_service: GroupService,
+            post_service: PostService,
+        ):
+            dist_id = await self._resolve_distribution_id_from_callback(callback_data, post_service)
+            if dist_id is None:
+                await callback.answer("Рассылка не найдена", show_alert=True)
+                return
+            data = await state.get_data()
+            selected_ids: list[str] = data.get("dist_edit_bindings_selected", [])
+            if not selected_ids:
+                await callback.answer(ux.admin.distribution_groups_add_nothing_text(), show_alert=True)
+                return
+            groups: list[GroupDTO] = []
+            for raw_id in selected_ids:
+                try:
+                    group_uuid = UUID(raw_id)
+                except ValueError:
+                    continue
+                group = await group_service.get(group_uuid)
+                if not group:
+                    continue
+                groups.append(group)
+            if not groups:
+                await callback.answer(ux.admin.distribution_groups_add_not_found_text(), show_alert=True)
+                return
+            context = await post_service.get_distribution_context(dist_id)
+            if context is None:
+                await callback.answer("Не удалось получить параметры рассылки", show_alert=True)
+                return
+            usage_map = await post_service.groups_distribution_usage([group.id for group in groups])
+            cleanup_ids = [
+                group_id
+                for group_id, linked_dist in usage_map.items()
+                if linked_dist and linked_dist != dist_id
+            ]
+            existing_ids = set(data.get("dist_edit_current_groups", []))
+            filtered_groups = [group for group in groups if str(group.id) not in existing_ids]
+            if not filtered_groups:
+                await callback.answer(ux.admin.distribution_groups_add_nothing_text(), show_alert=True)
+                return
+            created, skipped_chat_ids = await post_service.add_groups_to_distribution(
+                context=context,
+                groups=filtered_groups,
+                cleanup_group_ids=cleanup_ids,
+            )
+            skipped_total = len(skipped_chat_ids)
+            await state.update_data(
+                dist_edit_bindings_selected=[],
+                dist_edit_bindings_items=[],
+            )
+            await callback.answer(ux.admin.distribution_groups_add_result_text(created=created, skipped=skipped_total), show_alert=True)
+            groups_page = data.get("dist_edit_groups_page", 1) or 1
+            card_page = data.get("dist_edit_card_page", 1) or 1
+            await self._render_distribution_groups_list(
+                callback,
+                ux,
+                dist_id,
+                page=groups_page,
+                card_page=card_page,
+            )
+
+        @self.callback_query(AdminDistributionsCallback.filter(F.action == AdminDistributionsAction.GROUPS_ADD_CANCEL))
+        async def dist_groups_add_cancel(
+            callback: CallbackQuery,
+            callback_data: AdminDistributionsCallback,
+            state: FSMContext,
+            ux: UXContext,
+            post_service: PostService,
+        ):
+            dist_id = await self._resolve_distribution_id_from_callback(callback_data, post_service)
+            if dist_id is None:
+                await callback.answer("Рассылка не найдена", show_alert=True)
+                return
+            data = await state.get_data()
+            groups_page = data.get("dist_edit_groups_page", callback_data.page or 1) or 1
+            card_page = data.get("dist_edit_card_page", callback_data.card_page or 1) or 1
+            await state.update_data(
+                dist_edit_bindings_selected=[],
+                dist_edit_bindings_items=[],
+            )
+            await self._render_distribution_groups_list(
+                callback,
+                ux,
+                dist_id,
+                page=groups_page,
+                card_page=card_page,
+            )
+
+        @self.callback_query(AdminDistributionsCallback.filter(F.action == AdminDistributionsAction.GROUPS_DELETE))
+        async def dist_groups_delete_mode(
+            callback: CallbackQuery,
+            callback_data: AdminDistributionsCallback,
+            state: FSMContext,
+            ux: UXContext,
+            post_service: PostService,
+        ):
+            dist_id = await self._resolve_distribution_id_from_callback(callback_data, post_service)
+            if dist_id is None:
+                await callback.answer("Рассылка не найдена", show_alert=True)
+                return
+            groups_page = callback_data.page or 1
+            card_page = callback_data.card_page or 1
+            await state.set_state(AdminStates.DISTRIBUTION_EDIT_DELETE_MODE)
+            await state.update_data(
+                dist_edit_distribution=str(dist_id),
+                dist_edit_groups_page=groups_page,
+                dist_edit_card_page=card_page,
+                dist_delete_selection=[],
+            )
+            await self._render_distribution_delete_mode(
+                callback,
+                ux,
+                dist_id,
+                page=groups_page,
+                card_page=card_page,
+                state=state,
+            )
+
+        @self.callback_query(AdminDistributionsCallback.filter(F.action == AdminDistributionsAction.GROUPS_DELETE_PAGE))
+        async def dist_groups_delete_page(
+            callback: CallbackQuery,
+            callback_data: AdminDistributionsCallback,
+            state: FSMContext,
+            ux: UXContext,
+            post_service: PostService,
+        ):
+            dist_id = await self._resolve_distribution_id_from_callback(callback_data, post_service)
+            if dist_id is None:
+                await callback.answer("Рассылка не найдена", show_alert=True)
+                return
+            data = await state.get_data()
+            card_page = data.get("dist_edit_card_page", callback_data.card_page or 1) or 1
+            page = callback_data.page or data.get("dist_edit_groups_page", 1) or 1
+            await self._render_distribution_delete_mode(
+                callback,
+                ux,
+                dist_id,
+                page=page,
+                card_page=card_page,
+                state=state,
+            )
+
+        @self.callback_query(AdminDistributionsCallback.filter(F.action == AdminDistributionsAction.GROUPS_DELETE_TOGGLE))
+        async def dist_groups_delete_toggle(
+            callback: CallbackQuery,
+            callback_data: AdminDistributionsCallback,
+            state: FSMContext,
+            ux: UXContext,
+            post_service: PostService,
+        ):
+            dist_id = await self._resolve_distribution_id_from_callback(callback_data, post_service)
+            if dist_id is None or not callback_data.group_id:
+                await callback.answer("Группа не найдена", show_alert=True)
+                return
+            data = await state.get_data()
+            selection: set[str] = set(data.get("dist_delete_selection", []))
+            if callback_data.group_id in selection:
+                selection.remove(callback_data.group_id)
+            else:
+                selection.add(callback_data.group_id)
+            await state.update_data(dist_delete_selection=list(selection))
+            page = callback_data.page or data.get("dist_edit_groups_page", 1) or 1
+            card_page = data.get("dist_edit_card_page", callback_data.card_page or 1) or 1
+            await self._render_distribution_delete_mode(
+                callback,
+                ux,
+                dist_id,
+                page=page,
+                card_page=card_page,
+                state=state,
+            )
+
+        @self.callback_query(AdminDistributionsCallback.filter(F.action == AdminDistributionsAction.GROUPS_DELETE_CANCEL))
+        async def dist_groups_delete_cancel(
+            callback: CallbackQuery,
+            callback_data: AdminDistributionsCallback,
+            state: FSMContext,
+            ux: UXContext,
+            post_service: PostService,
+        ):
+            dist_id = await self._resolve_distribution_id_from_callback(callback_data, post_service)
+            if dist_id is None:
+                await callback.answer("Рассылка не найдена", show_alert=True)
+                return
+            await state.clear()
+            page = callback_data.page or 1
+            card_page = callback_data.card_page or 1
+            await self._render_distribution_groups_list(
+                callback,
+                ux,
+                dist_id,
+                page=page,
+                card_page=card_page,
+            )
+
+        @self.callback_query(AdminDistributionsCallback.filter(F.action == AdminDistributionsAction.GROUPS_DELETE_CONFIRM))
+        async def dist_groups_delete_confirm(
+            callback: CallbackQuery,
+            callback_data: AdminDistributionsCallback,
+            state: FSMContext,
+            ux: UXContext,
+            post_service: PostService,
+        ):
+            dist_id = await self._resolve_distribution_id_from_callback(callback_data, post_service)
+            if dist_id is None:
+                await callback.answer("Рассылка не найдена", show_alert=True)
+                return
+            data = await state.get_data()
+            selection: list[str] = data.get("dist_delete_selection", [])
+            if not selection:
+                await callback.answer(ux.admin.distribution_groups_delete_none_text(), show_alert=True)
+                return
+            page = callback_data.page or data.get("dist_edit_groups_page", 1) or 1
+            card_page = callback_data.card_page or data.get("dist_edit_card_page", 1) or 1
+            choice = (callback_data.choice or "").lower()
+            if choice == "yes":
+                group_ids = []
+                for raw_id in selection:
+                    try:
+                        group_ids.append(UUID(raw_id))
+                    except ValueError:
+                        continue
+                deleted = await post_service.delete_distribution_groups(dist_id, group_ids)
+                await callback.answer(ux.admin.distribution_groups_delete_done_text(deleted), show_alert=True)
+                await state.clear()
+                await self._render_distribution_groups_list(
+                    callback,
+                    ux,
+                    dist_id,
+                    page=page,
+                    card_page=card_page,
+                )
+                return
+            if choice == "no":
+                await self._render_distribution_delete_mode(
+                    callback,
+                    ux,
+                    dist_id,
+                    page=page,
+                    card_page=card_page,
+                    state=state,
+                )
+                return
+            confirm_text = ux.admin.distribution_groups_delete_confirm_text(len(selection))
+            keyboard = AdminInlineKeyboards.build_admin_distribution_groups_delete_confirm_keyboard(
+                distribution_id=dist_id,
+                page=page,
+                card_page=card_page,
+            )
+            await edit_message(callback, confirm_text, reply_markup=keyboard)
+
         # отмена создания
         @self.callback_query(AdminDistributionsCallback.filter(F.action == AdminDistributionsAction.CANCEL))
         async def dist_cancel(callback: CallbackQuery, state: FSMContext, ux: UXContext):
@@ -947,6 +1318,101 @@ class AdminRouter(BaseRouter):
         # ==========================
         # Сообщения, которые продолжают создание рассылки
         # ==========================
+        @self.message(AdminStates.DISTRIBUTION_EDIT_WAIT_GROUP_IDS)
+        async def distribution_edit_receive_group_ids(
+            message: Message,
+            state: FSMContext,
+            group_service: GroupService,
+            bot_service: BotService,
+            post_service: PostService,
+            ux: UXContext,
+        ):
+            data = await state.get_data()
+            dist_raw = data.get("dist_edit_distribution")
+            if not dist_raw:
+                await message.answer("Рассылка не выбрана")
+                await state.clear()
+                return
+            try:
+                dist_id = UUID(dist_raw)
+            except ValueError:
+                await message.answer("Рассылка не найдена")
+                await state.clear()
+                return
+            groups_page = data.get("dist_edit_groups_page", 1) or 1
+            card_page = data.get("dist_edit_card_page", 1) or 1
+            text = message.text or ""
+            chat_ids: list[int] = []
+            for token in text.replace(',', ' ').split():
+                token = token.strip()
+                if not token:
+                    continue
+                try:
+                    if token.startswith('-100') or token.startswith('-'):
+                        chat_ids.append(int(token))
+                    else:
+                        chat_ids.append(int("-100" + token))
+                except ValueError:
+                    continue
+            if not chat_ids:
+                await message.answer(ux.admin.distribution_groups_add_not_found_text())
+                return
+            unique_ids = list(dict.fromkeys(chat_ids))
+            groups: list[GroupDTO] = []
+            for chat_id in unique_ids:
+                group = await group_service.get_by_tg_chat_id(chat_id)
+                if not group:
+                    continue
+                group = await group_service.ensure_metadata(group, bot_service)
+                groups.append(group)
+            if not groups:
+                await message.answer(ux.admin.distribution_groups_add_not_found_text())
+                return
+            context = await post_service.get_distribution_context(dist_id)
+            if context is None:
+                await message.answer("Не удалось получить параметры рассылки")
+                await state.clear()
+                return
+            summary = await post_service.get_distribution_summary(dist_id)
+            if summary is None or summary.get("source_message_id") is None:
+                await message.answer("Рассылка не найдена")
+                await state.clear()
+                return
+            posts = await post_service.list_distribution_posts(
+                source_channel_username=summary.get("source_channel_username"),
+                source_channel_id=summary.get("source_channel_id"),
+                source_message_id=summary.get("source_message_id"),
+            )
+            existing_ids = {str(post.group_id) for post in posts if post.group_id}
+            usage_map = await post_service.groups_distribution_usage([group.id for group in groups])
+            cleanup_ids = [
+                group_id
+                for group_id, linked_dist in usage_map.items()
+                if linked_dist and linked_dist != dist_id
+            ]
+            filtered_groups = [group for group in groups if str(group.id) not in existing_ids]
+            if not filtered_groups:
+                await message.answer(ux.admin.distribution_groups_add_nothing_text())
+                return
+            created, skipped_chat_ids = await post_service.add_groups_to_distribution(
+                context=context,
+                groups=filtered_groups,
+                cleanup_group_ids=cleanup_ids,
+            )
+            await state.clear()
+            summary_text = ux.admin.distribution_groups_add_result_text(
+                created=created,
+                skipped=len(skipped_chat_ids),
+            )
+            await message.answer(summary_text)
+            await self._render_distribution_groups_list(
+                message,
+                ux,
+                dist_id,
+                page=groups_page,
+                card_page=card_page,
+            )
+
         @self.message(AdminStates.DISTRIBUTION_WAIT_NAME)
         async def distribution_receive_name(message: Message, state: FSMContext, ux: UXContext):
             name = (message.text or "").strip()
@@ -1243,6 +1709,137 @@ class AdminRouter(BaseRouter):
         )
         await edit_message(event, view.text, reply_markup=keyboard)
 
+    async def _prepare_bindings_pool(
+        self,
+        state: FSMContext,
+        distribution_id: UUID,
+        group_service: GroupService,
+        bot_service: BotService,
+        post_service: PostService,
+        ux: UXContext,
+    ) -> None:
+        data = await state.get_data()
+        if data.get("dist_edit_bindings_items"):
+            return
+        summary = await post_service.get_distribution_summary(distribution_id)
+        if summary is None or summary.get("source_message_id") is None:
+            return
+        posts = await post_service.list_distribution_posts(
+            source_channel_username=summary.get("source_channel_username"),
+            source_channel_id=summary.get("source_channel_id"),
+            source_message_id=summary.get("source_message_id"),
+        )
+        existing_ids = {str(post.group_id) for post in posts if post.group_id}
+        groups = await group_service.list_bound(limit=2000)
+        groups = await group_service.ensure_metadata_bulk(groups, bot_service)
+        usage_map = await post_service.groups_distribution_usage([group.id for group in groups])
+        items: list[dict[str, object]] = []
+        for group in groups:
+            if not group.assigned_bot_id:
+                continue
+            group_id_str = str(group.id)
+            if group_id_str in existing_ids:
+                continue
+            status = "free"
+            linked = usage_map.get(group.id)
+            if linked and linked != distribution_id:
+                status = "busy"
+            elif linked == distribution_id:
+                continue
+            title = group.title or (group.username and f"@{group.username}") or str(group.tg_chat_id)
+            items.append(
+                {
+                    "id": group_id_str,
+                    "title": title,
+                    "chat_id": group.tg_chat_id,
+                    "status": status,
+                }
+            )
+        await state.update_data(
+            dist_edit_bindings_items=items,
+            dist_edit_current_groups=list(existing_ids),
+            dist_edit_bindings_selected=data.get("dist_edit_bindings_selected", []),
+        )
+
+    async def _render_bindings_selection(
+        self,
+        event: CallbackQuery,
+        ux: UXContext,
+        state: FSMContext,
+        *,
+        distribution_id: UUID,
+        page: int,
+    ) -> None:
+        data = await state.get_data()
+        items: list[dict] = data.get("dist_edit_bindings_items", [])
+        groups_page = data.get("dist_edit_groups_page", 1) or 1
+        card_page = data.get("dist_edit_card_page", 1) or 1
+        if not items:
+            keyboard = AdminInlineKeyboards.build_admin_distribution_groups_add_method_keyboard(
+                distribution_id=distribution_id,
+                groups_page=groups_page,
+                card_page=card_page,
+            )
+            await edit_message(event, ux.admin.distribution_groups_add_not_found_text(), reply_markup=keyboard)
+            return
+        page_size = 6
+        total_pages = max(1, math.ceil(len(items) / page_size))
+        page = max(1, min(page, total_pages))
+        start = (page - 1) * page_size
+        subset = items[start:start + page_size]
+        selected = set(data.get("dist_edit_bindings_selected", []))
+        rows: list[tuple[str, str, bool]] = []
+        for item in subset:
+            status_icon = "🟢" if item.get("status") == "free" else "🟠"
+            title = item.get("title") or "—"
+            chat_id = item.get("chat_id")
+            label = f"{status_icon} {title} • {chat_id}"
+            rows.append((item["id"], label, item["id"] in selected))
+        keyboard = AdminInlineKeyboards.build_admin_distribution_groups_bindings_keyboard(
+            rows,
+            distribution_id=distribution_id,
+            page=page,
+            total_pages=total_pages,
+            groups_page=groups_page,
+            card_page=card_page,
+        )
+        text_lines = [
+            ux.admin.distribution_groups_add_bindings_intro_text(),
+            ux.admin.distribution_groups_delete_hint_text(len(selected)),
+        ]
+        await edit_message(event, "\n\n".join(filter(None, text_lines)), reply_markup=keyboard)
+        await state.update_data(dist_edit_bindings_page=page)
+
+    async def _render_distribution_delete_mode(
+        self,
+        event: CallbackQuery,
+        ux: UXContext,
+        distribution_id: UUID,
+        *,
+        page: int,
+        card_page: int,
+        state: FSMContext,
+    ) -> None:
+        view = await ux.admin.show_distribution_groups(distribution_id, page=page)
+        data = await state.get_data()
+        selection = set(data.get("dist_delete_selection", []))
+        text_lines = [
+            ux.admin.distribution_groups_delete_intro_text(),
+            ux.admin.distribution_groups_delete_hint_text(len(selection)),
+            view.text,
+        ]
+        keyboard = AdminInlineKeyboards.build_admin_distribution_groups_delete_keyboard(
+            view,
+            distribution_id=distribution_id,
+            card_page=card_page,
+            selected_ids=selection,
+        )
+        await edit_message(event, "\n\n".join(filter(None, text_lines)), reply_markup=keyboard)
+        await state.update_data(
+            dist_edit_groups_page=view.page,
+            dist_edit_card_page=card_page,
+        )
+
     async def _render_distributions_menu(self, event: CallbackQuery | Message, ux: UXContext) -> None:
         text = ux.admin.distributions_menu_text()
         keyboard = AdminInlineKeyboards.build_admin_distributions_menu_keyboard()
@@ -1343,6 +1940,20 @@ class AdminRouter(BaseRouter):
             await event.answer(text, reply_markup=keyboard)
         else:
             await edit_message(event, text, reply_markup=keyboard)
+
+    async def _resolve_distribution_id_from_callback(
+        self,
+        callback_data: AdminDistributionsCallback,
+        post_service: PostService,
+    ) -> UUID | None:
+        if callback_data.distribution_id:
+            return self._decode_distribution_id(callback_data.distribution_id)
+        if callback_data.post_id:
+            post_id = self._decode_post_id(callback_data.post_id)
+            if post_id is None:
+                return None
+            return await post_service.resolve_distribution_id_by_post(post_id)
+        return None
 
     def _pack_group_dto(self, group) -> dict[str, object]:
         assigned_bot_id = str(group.assigned_bot_id) if group.assigned_bot_id else None

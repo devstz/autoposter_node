@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, Iterable
 from uuid import UUID
 
-from common.dto import PostDTO
+from common.dto import PostDTO, GroupDTO, DistributionContextDTO
 from infra.db.models import PostStatus, Post
 from infra.db.uow import SQLAlchemyUnitOfWork
 
@@ -204,3 +204,91 @@ class PostService:
             source_message_id=source_message_id,
         )
         return [PostDTO.from_model(post) for post in posts]
+
+    async def get_distribution_context(self, distribution_id: UUID) -> DistributionContextDTO | None:
+        summary = await self.get_distribution_summary(distribution_id)
+        if summary is None:
+            return None
+        source_message_id = summary.get("source_message_id")
+        if source_message_id is None:
+            return None
+        config = await self._uow.post_repo.get_distribution_config(
+            source_channel_username=summary.get("source_channel_username"),
+            source_channel_id=summary.get("source_channel_id"),
+            source_message_id=source_message_id,
+        )
+        if config is None:
+            return None
+        return DistributionContextDTO(
+            distribution_id=distribution_id,
+            name=summary.get("distribution_name"),
+            source_channel_username=summary.get("source_channel_username"),
+            source_channel_id=summary.get("source_channel_id"),
+            source_message_id=int(source_message_id),
+            pause_between_attempts_s=int(config.get("pause_between_attempts_s") or 60),
+            delete_last_attempt=bool(config.get("delete_last_attempt")),
+            pin_after_post=bool(config.get("pin_after_post")),
+            num_attempt_for_pin_post=config.get("num_attempt_for_pin_post"),
+            target_attempts=int(config.get("target_attempts") or 1),
+            notify_on_failure=bool(summary.get("notify_on_failure", True)),
+        )
+
+    async def delete_distribution_groups(self, distribution_id: UUID, group_ids: list[UUID]) -> int:
+        if not group_ids:
+            return 0
+        summary = await self.get_distribution_summary(distribution_id)
+        if summary is None:
+            return 0
+        return await self._uow.post_repo.delete_distribution_groups(
+            source_channel_username=summary.get("source_channel_username"),
+            source_channel_id=summary.get("source_channel_id"),
+            source_message_id=summary.get("source_message_id"),
+            group_ids=group_ids,
+        )
+
+    async def groups_distribution_usage(self, group_ids: list[UUID]) -> dict[UUID, UUID]:
+        raw = await self._uow.post_repo.groups_distribution_usage(group_ids)
+        result: dict[UUID, UUID] = {}
+        for group_id, distribution_id in raw.items():
+            if not distribution_id:
+                continue
+            try:
+                result[group_id] = UUID(distribution_id)
+            except ValueError:
+                continue
+        return result
+
+    async def add_groups_to_distribution(
+        self,
+        *,
+        context: DistributionContextDTO,
+        groups: Iterable[GroupDTO],
+        cleanup_group_ids: Iterable[UUID] | None = None,
+    ) -> tuple[int, list[int]]:
+        cleanup_ids = list(dict.fromkeys(cleanup_group_ids or []))
+        if cleanup_ids:
+            await self.delete_active_by_groups(cleanup_ids)
+
+        created = 0
+        skipped: list[int] = []
+        for group in groups:
+            if not group.assigned_bot_id:
+                skipped.append(group.tg_chat_id)
+                continue
+            await self.create(
+                group_id=group.id,
+                target_chat_id=group.tg_chat_id,
+                distribution_name=context.name,
+                source_channel_username=context.source_channel_username or "",
+                source_channel_id=context.source_channel_id,
+                source_message_id=context.source_message_id,
+                bot_id=group.assigned_bot_id,
+                pause_between_attempts_s=context.pause_between_attempts_s,
+                delete_last_attempt=context.delete_last_attempt,
+                pin_after_post=context.pin_after_post,
+                num_attempt_for_pin_post=context.num_attempt_for_pin_post,
+                target_attempts=context.target_attempts,
+                notify_on_failure=context.notify_on_failure,
+            )
+            created += 1
+        return created, skipped

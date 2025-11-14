@@ -253,6 +253,30 @@ class SQLAlchemyPostRepository:
         await self.__session.flush()
         return len(res.fetchall())
 
+    async def delete_distribution_groups(
+        self,
+        *,
+        source_channel_username: str | None,
+        source_channel_id: int | None,
+        source_message_id: int,
+        group_ids: list[UUID],
+    ) -> int:
+        if not group_ids:
+            return 0
+        conditions = self._distribution_filters(
+            source_channel_username=source_channel_username,
+            source_channel_id=source_channel_id,
+            source_message_id=source_message_id,
+        )
+        conditions.append(Post.group_id.in_(group_ids))
+        res = await self.__session.execute(
+            sa_delete(Post)
+            .where(and_(*conditions))
+            .returning(Post.id)
+        )
+        await self.__session.flush()
+        return len(res.fetchall())
+
     async def resolve_distribution_id_by_source(
         self,
         *,
@@ -433,6 +457,36 @@ class SQLAlchemyPostRepository:
             return None
         return dict(row._mapping)
 
+    async def get_distribution_config(
+        self,
+        *,
+        source_channel_username: str | None,
+        source_channel_id: int | None,
+        source_message_id: int,
+    ) -> dict | None:
+        conditions = self._distribution_filters(
+            source_channel_username=source_channel_username,
+            source_channel_id=source_channel_id,
+            source_message_id=source_message_id,
+        )
+        stmt = (
+            select(
+                Post.pause_between_attempts_s.label("pause_between_attempts_s"),
+                Post.delete_last_attempt.label("delete_last_attempt"),
+                Post.pin_after_post.label("pin_after_post"),
+                Post.num_attempt_for_pin_post.label("num_attempt_for_pin_post"),
+                Post.target_attempts.label("target_attempts"),
+            )
+            .where(and_(*conditions))
+            .order_by(Post.created_at.asc())
+            .limit(1)
+        )
+        res = await self.__session.execute(stmt)
+        row = res.first()
+        if row is None:
+            return None
+        return dict(row._mapping)
+
     async def list_distribution_posts(
         self,
         *,
@@ -458,6 +512,25 @@ class SQLAlchemyPostRepository:
         stmt = stmt.order_by(Post.created_at.desc())
         res = await self.__session.execute(stmt)
         return list(res.unique().scalars().all())
+
+    async def groups_distribution_usage(self, group_ids: list[UUID]) -> dict[UUID, str]:
+        if not group_ids:
+            return {}
+        stmt = (
+            select(
+                Post.group_id,
+                func.min(cast(Post.id, String)).label("distribution_id"),
+            )
+            .where(
+                and_(
+                    Post.group_id.in_(group_ids),
+                    Post.status.in_(ACTIVE_STATUSES),
+                )
+            )
+            .group_by(Post.group_id)
+        )
+        res = await self.__session.execute(stmt)
+        return {row.group_id: row.distribution_id for row in res.fetchall()}
 
     async def pause(self, post_id: UUID) -> None:
         await self.__session.execute(

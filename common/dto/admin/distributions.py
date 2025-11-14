@@ -72,3 +72,18 @@ class DistributionGroupCardDTO:
     post_id: UUID
     group_id: UUID
     text: str
+
+
+@dataclass(slots=True)
+class DistributionContextDTO:
+    distribution_id: UUID
+    name: Optional[str]
+    source_channel_username: Optional[str]
+    source_channel_id: Optional[int]
+    source_message_id: int
+    pause_between_attempts_s: int
+    delete_last_attempt: bool
+    pin_after_post: bool
+    num_attempt_for_pin_post: Optional[int]
+    target_attempts: int
+    notify_on_failure: bool

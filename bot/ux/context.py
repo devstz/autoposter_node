@@ -336,6 +336,43 @@ class AdminUX:
             )'''
         return "\n\n".join(lines)
 
+    def distribution_groups_add_intro_text(self) -> str:
+        return self._distributions_texts.get("groups_add_intro", "")
+
+    def distribution_groups_add_manual_prompt_text(self) -> str:
+        return self._distributions_texts.get("groups_add_manual_prompt", "")
+
+    def distribution_groups_add_bindings_intro_text(self) -> str:
+        return self._distributions_texts.get("groups_add_bindings_intro", "")
+
+    def distribution_groups_add_result_text(self, *, created: int, skipped: int) -> str:
+        template = self._distributions_texts.get("groups_add_result", "Добавлено: {created}, пропущено: {skipped}.")
+        return template.format(created=created, skipped=skipped)
+
+    def distribution_groups_add_nothing_text(self) -> str:
+        return self._distributions_texts.get("groups_add_nothing", "Не выбрано ни одной группы.")
+
+    def distribution_groups_add_not_found_text(self) -> str:
+        return self._distributions_texts.get("groups_add_not_found", "Не удалось найти группы по указанным ID.")
+
+    def distribution_groups_delete_intro_text(self) -> str:
+        return self._distributions_texts.get("groups_delete_intro", "")
+
+    def distribution_groups_delete_hint_text(self, count: int) -> str:
+        template = self._distributions_texts.get("groups_delete_hint", "Выбрано: {count}")
+        return template.format(count=count)
+
+    def distribution_groups_delete_none_text(self) -> str:
+        return self._distributions_texts.get("groups_delete_none", "Сначала выбери группы.")
+
+    def distribution_groups_delete_confirm_text(self, count: int) -> str:
+        template = self._distributions_texts.get("groups_delete_confirm", "Удалить выбранные группы ({count})?")
+        return template.format(count=count)
+
+    def distribution_groups_delete_done_text(self, count: int) -> str:
+        template = self._distributions_texts.get("groups_delete_done", "Удалено групп: {count}.")
+        return template.format(count=count)
+
     def format_bot_label(self, bot: BotDTO | None) -> str:
         if bot is None:
             return self._groups_texts.get("card_not_bound", "—")
