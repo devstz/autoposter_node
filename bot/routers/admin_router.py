@@ -809,6 +809,8 @@ class AdminRouter(BaseRouter):
             post_service: PostService,
         ):
             dist_id = await self._resolve_distribution_id_from_callback(callback_data, post_service)
+            if dist_id is None:
+                dist_id = await self._get_distribution_id_from_state(state)
             if dist_id is None or not callback_data.group_id:
                 await callback.answer("Группа не найдена", show_alert=True)
                 return
@@ -992,6 +994,8 @@ class AdminRouter(BaseRouter):
             post_service: PostService,
         ):
             dist_id = await self._resolve_distribution_id_from_callback(callback_data, post_service)
+            if dist_id is None:
+                dist_id = await self._get_distribution_id_from_state(state)
             if dist_id is None or not callback_data.group_id:
                 await callback.answer("Группа не найдена", show_alert=True)
                 return
@@ -2053,4 +2057,14 @@ class AdminRouter(BaseRouter):
             return UUID(bytes=base64.urlsafe_b64decode(padded.encode()))
         except (ValueError, TypeError) as exc:
             logger.error("Error decoding %s ID: %s", label, exc)
+            return None
+
+    async def _get_distribution_id_from_state(self, state: FSMContext) -> UUID | None:
+        data = await state.get_data()
+        dist_raw = data.get("dist_edit_distribution")
+        if not dist_raw:
+            return None
+        try:
+            return UUID(dist_raw)
+        except ValueError:
             return None

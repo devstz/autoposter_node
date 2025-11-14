@@ -842,10 +842,9 @@ class AdminInlineKeyboards:
                     text=f"{prefix}{label}",
                     callback_data=AdminDistributionsCallback(
                         action=AdminDistributionsAction.GROUPS_ADD_TOGGLE,
-                        distribution_id=encoded_distribution_id,
+                        distribution_id=None,
                         group_id=encoded_group_id,
                         page=page,
-                        card_page=card_page,
                     ).pack(),
                 )
             )
@@ -934,10 +933,9 @@ class AdminInlineKeyboards:
                     text=f"{prefix}{item.label}",
                     callback_data=AdminDistributionsCallback(
                         action=AdminDistributionsAction.GROUPS_DELETE_TOGGLE,
-                        distribution_id=encoded_distribution_id,
+                        distribution_id=None,
                         group_id=encoded_group_id,
                         page=view.page,
-                        card_page=card_page,
                     ).pack(),
                 )
             )
