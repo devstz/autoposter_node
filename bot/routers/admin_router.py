@@ -788,6 +788,8 @@ class AdminRouter(BaseRouter):
         ):
             dist_id = await self._resolve_distribution_id_from_callback(callback_data, post_service)
             if dist_id is None:
+                dist_id = await self._get_distribution_id_from_state(state)
+            if dist_id is None:
                 await callback.answer("Рассылка не найдена", show_alert=True)
                 return
             desired_page = callback_data.page or 1
@@ -846,6 +848,8 @@ class AdminRouter(BaseRouter):
             post_service: PostService,
         ):
             dist_id = await self._resolve_distribution_id_from_callback(callback_data, post_service)
+            if dist_id is None:
+                dist_id = await self._get_distribution_id_from_state(state)
             if dist_id is None:
                 await callback.answer("Рассылка не найдена", show_alert=True)
                 return
@@ -914,6 +918,8 @@ class AdminRouter(BaseRouter):
         ):
             dist_id = await self._resolve_distribution_id_from_callback(callback_data, post_service)
             if dist_id is None:
+                dist_id = await self._get_distribution_id_from_state(state)
+            if dist_id is None:
                 await callback.answer("Рассылка не найдена", show_alert=True)
                 return
             data = await state.get_data()
@@ -940,6 +946,8 @@ class AdminRouter(BaseRouter):
             post_service: PostService,
         ):
             dist_id = await self._resolve_distribution_id_from_callback(callback_data, post_service)
+            if dist_id is None:
+                dist_id = await self._get_distribution_id_from_state(state)
             if dist_id is None:
                 await callback.answer("Рассылка не найдена", show_alert=True)
                 return
@@ -970,6 +978,8 @@ class AdminRouter(BaseRouter):
             post_service: PostService,
         ):
             dist_id = await self._resolve_distribution_id_from_callback(callback_data, post_service)
+            if dist_id is None:
+                dist_id = await self._get_distribution_id_from_state(state)
             if dist_id is None:
                 await callback.answer("Рассылка не найдена", show_alert=True)
                 return
@@ -1031,6 +1041,8 @@ class AdminRouter(BaseRouter):
             post_service: PostService,
         ):
             dist_id = await self._resolve_distribution_id_from_callback(callback_data, post_service)
+            if dist_id is None:
+                dist_id = await self._get_distribution_id_from_state(state)
             if dist_id is None:
                 await callback.answer("Рассылка не найдена", show_alert=True)
                 return

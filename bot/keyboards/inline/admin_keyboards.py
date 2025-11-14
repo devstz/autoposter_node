@@ -857,9 +857,7 @@ class AdminInlineKeyboards:
                         text=RU_BUTTONS["pagination"]["prev"],
                         callback_data=AdminDistributionsCallback(
                             action=AdminDistributionsAction.GROUPS_ADD_BINDINGS_PAGE,
-                            distribution_id=encoded_distribution_id,
                             page=page - 1,
-                            card_page=card_page,
                         ).pack(),
                     )
                 )
@@ -868,9 +866,7 @@ class AdminInlineKeyboards:
                     text=RU_BUTTONS["pagination"]["indicator"].format(current=page, total=total_pages),
                     callback_data=AdminDistributionsCallback(
                         action=AdminDistributionsAction.GROUPS_ADD_BINDINGS_PAGE,
-                        distribution_id=encoded_distribution_id,
                         page=page,
-                        card_page=card_page,
                     ).pack(),
                 )
             )
@@ -880,9 +876,7 @@ class AdminInlineKeyboards:
                         text=RU_BUTTONS["pagination"]["next"],
                         callback_data=AdminDistributionsCallback(
                             action=AdminDistributionsAction.GROUPS_ADD_BINDINGS_PAGE,
-                            distribution_id=encoded_distribution_id,
                             page=page + 1,
-                            card_page=card_page,
                         ).pack(),
                     )
                 )
@@ -893,18 +887,14 @@ class AdminInlineKeyboards:
                 text=RU_BUTTONS["distributions"]["groups_add_apply"],
                 callback_data=AdminDistributionsCallback(
                     action=AdminDistributionsAction.GROUPS_ADD_APPLY,
-                    distribution_id=encoded_distribution_id,
                     page=page,
-                    card_page=card_page,
                 ).pack(),
             ),
             InlineKeyboardButton(
                 text=RU_BUTTONS["distributions"]["groups_add_cancel"],
                 callback_data=AdminDistributionsCallback(
                     action=AdminDistributionsAction.GROUPS_ADD_CANCEL,
-                    distribution_id=encoded_distribution_id,
                     page=groups_page,
-                    card_page=card_page,
                 ).pack(),
             ),
         )
@@ -948,9 +938,7 @@ class AdminInlineKeyboards:
                         text=RU_BUTTONS["pagination"]["prev"],
                         callback_data=AdminDistributionsCallback(
                             action=AdminDistributionsAction.GROUPS_DELETE_PAGE,
-                            distribution_id=encoded_distribution_id,
                             page=view.page - 1,
-                            card_page=card_page,
                         ).pack(),
                     )
                 )
@@ -959,9 +947,7 @@ class AdminInlineKeyboards:
                     text=RU_BUTTONS["pagination"]["indicator"].format(current=view.page, total=view.total_pages),
                     callback_data=AdminDistributionsCallback(
                         action=AdminDistributionsAction.GROUPS_DELETE_PAGE,
-                        distribution_id=encoded_distribution_id,
                         page=view.page,
-                        card_page=card_page,
                     ).pack(),
                 )
             )
@@ -971,9 +957,7 @@ class AdminInlineKeyboards:
                         text=RU_BUTTONS["pagination"]["next"],
                         callback_data=AdminDistributionsCallback(
                             action=AdminDistributionsAction.GROUPS_DELETE_PAGE,
-                            distribution_id=encoded_distribution_id,
                             page=view.page + 1,
-                            card_page=card_page,
                         ).pack(),
                     )
                 )
@@ -984,18 +968,14 @@ class AdminInlineKeyboards:
                 text=RU_BUTTONS["distributions"]["groups_delete_cancel"],
                 callback_data=AdminDistributionsCallback(
                     action=AdminDistributionsAction.GROUPS_DELETE_CANCEL,
-                    distribution_id=encoded_distribution_id,
                     page=view.page,
-                    card_page=card_page,
                 ).pack(),
             ),
             InlineKeyboardButton(
                 text=RU_BUTTONS["distributions"]["groups_delete_apply"],
                 callback_data=AdminDistributionsCallback(
                     action=AdminDistributionsAction.GROUPS_DELETE_CONFIRM,
-                    distribution_id=encoded_distribution_id,
                     page=view.page,
-                    card_page=card_page,
                 ).pack(),
             ),
         )
@@ -1009,13 +989,11 @@ class AdminInlineKeyboards:
         card_page: int,
     ) -> InlineKeyboardMarkup:
         builder = InlineKeyboardBuilder()
-        encoded_distribution_id = _encode_uuid(distribution_id)
         builder.row(
             InlineKeyboardButton(
                 text=RU_BUTTONS["confirm"]["yes"],
                 callback_data=AdminDistributionsCallback(
                     action=AdminDistributionsAction.GROUPS_DELETE_CONFIRM,
-                    distribution_id=encoded_distribution_id,
                     page=page,
                     card_page=card_page,
                     choice="yes",
@@ -1025,7 +1003,6 @@ class AdminInlineKeyboards:
                 text=RU_BUTTONS["confirm"]["no"],
                 callback_data=AdminDistributionsCallback(
                     action=AdminDistributionsAction.GROUPS_DELETE_CONFIRM,
-                    distribution_id=encoded_distribution_id,
                     page=page,
                     card_page=card_page,
                     choice="no",
