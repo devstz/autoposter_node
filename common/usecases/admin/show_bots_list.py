@@ -51,7 +51,13 @@ class ShowBotsListUseCase:
             status_display = self._status_texts.get(status_key, "")
             status = status_display.split()[0] if status_display else ""
 
-            display_name = bot.name or bot.username or self._texts.get("item_placeholder", "—")
+            if bot.username:
+                username = bot.username
+                if not username.startswith("@"):
+                    username = f"@{username}"
+                display_name = username
+            else:
+                display_name = bot.name or self._texts.get("item_placeholder", "—")
             label = self._texts["item_template"].format(
                 status=status,
                 name=display_name,
