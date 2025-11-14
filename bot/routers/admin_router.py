@@ -1821,9 +1821,9 @@ class AdminRouter(BaseRouter):
             status_icon = "🟢" if item.get("status") == "free" else "🟠"
             title = item.get("title") or "—"
             chat_id = item.get("chat_id")
-            chat_id_str = str(chat_id)
+            group_uuid = str(item.get("uuid"))
             label = f"{status_icon} {title} • {chat_id}"
-            rows.append((chat_id_str, label, chat_id_str in selected))
+            rows.append((group_uuid, label, group_uuid in selected))
         keyboard = AdminInlineKeyboards.build_admin_distribution_groups_bindings_keyboard(
             rows,
             distribution_id=distribution_id,

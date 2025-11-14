@@ -675,7 +675,9 @@ class AdminInlineKeyboards:
                     page=view.page,
                     card_page=card_page,
                 ).pack(),
-            ),
+            )
+        )
+        builder.row(
             InlineKeyboardButton(
                 text=RU_BUTTONS["distributions"]["groups_delete"],
                 callback_data=AdminDistributionsCallback(
@@ -684,7 +686,7 @@ class AdminInlineKeyboards:
                     page=view.page,
                     card_page=card_page,
                 ).pack(),
-            ),
+            )
         )
 
         if view.total_pages > 1 and encoded_anchor_post_id is not None:
