@@ -28,7 +28,7 @@ from logging import getLogger
 
 logger = getLogger('PostingRunner')
 
-SLEEP_INTERVAL_SECONDS = 1
+SLEEP_INTERVAL_SECONDS = 5
 
 
 class PostingRunner:

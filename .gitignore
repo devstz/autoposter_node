@@ -6,6 +6,7 @@ __pycache__/
 *$py.class
 
 alembic.ini
+**/alembic.ini
 
 # C extensions
 *.so
