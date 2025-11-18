@@ -384,12 +384,12 @@ class SQLAlchemyPostRepository:
         return len(res.fetchall())
 
     async def count_distributions(self) -> int:
-        username_expr = func.coalesce(Post.source_channel_username, "")
-        # Используем source_channel_id напрямую в GROUP BY, чтобы NULL значения группировались отдельно
-        # Это предотвращает объединение разных рассылок с NULL в одну группу
+        # Используем source_channel_username и source_channel_id напрямую в GROUP BY
+        # Поле source_channel_username не может быть NULL (nullable=False), поэтому COALESCE не нужен
+        # Это обеспечивает консистентность между GROUP BY и SELECT
         grouped = (
-            select(username_expr, Post.source_channel_id, Post.source_message_id)
-            .group_by(username_expr, Post.source_channel_id, Post.source_message_id)
+            select(Post.source_channel_username, Post.source_channel_id, Post.source_message_id)
+            .group_by(Post.source_channel_username, Post.source_channel_id, Post.source_message_id)
         ).subquery()
         stmt = select(func.count()).select_from(grouped)
         res = await self.__session.execute(stmt)
@@ -397,9 +397,9 @@ class SQLAlchemyPostRepository:
         return int(scalar or 0)
 
     async def list_distributions(self, *, limit: int, offset: int) -> list[dict]:
-        username_expr = func.coalesce(Post.source_channel_username, "")
-        # Используем source_channel_id напрямую в GROUP BY, чтобы NULL значения группировались отдельно
-        # Это предотвращает объединение разных рассылок с NULL в одну группу
+        # Используем source_channel_username и source_channel_id напрямую в GROUP BY
+        # Поле source_channel_username не может быть NULL (nullable=False), поэтому COALESCE не нужен
+        # Это обеспечивает консистентность между GROUP BY и SELECT
 
         aggregated = (
             select(
@@ -417,7 +417,7 @@ class SQLAlchemyPostRepository:
                 func.sum(case((Post.status == PostStatus.ERROR.value, 1), else_=0)).label("error_count"),
                 func.sum(case((Post.status == PostStatus.DONE.value, 1), else_=0)).label("done_count"),
             )
-            .group_by(username_expr, Post.source_channel_id, Post.source_message_id)
+            .group_by(Post.source_channel_username, Post.source_channel_id, Post.source_message_id)
         ).subquery()
 
         stmt = (
@@ -430,9 +430,9 @@ class SQLAlchemyPostRepository:
         return [dict(row._mapping) for row in res.fetchall()]
 
     async def get_distribution_summary(self, distribution_id: UUID) -> dict | None:
-        username_expr = func.coalesce(Post.source_channel_username, "")
-        # Используем source_channel_id напрямую в GROUP BY, чтобы NULL значения группировались отдельно
-        # Это предотвращает объединение разных рассылок с NULL в одну группу
+        # Используем source_channel_username и source_channel_id напрямую в GROUP BY
+        # Поле source_channel_username не может быть NULL (nullable=False), поэтому COALESCE не нужен
+        # Это обеспечивает консистентность между GROUP BY и SELECT
 
         aggregated = (
             select(
@@ -450,7 +450,7 @@ class SQLAlchemyPostRepository:
                 func.sum(case((Post.status == PostStatus.ERROR.value, 1), else_=0)).label("error_count"),
                 func.sum(case((Post.status == PostStatus.DONE.value, 1), else_=0)).label("done_count"),
             )
-            .group_by(username_expr, Post.source_channel_id, Post.source_message_id)
+            .group_by(Post.source_channel_username, Post.source_channel_id, Post.source_message_id)
         ).subquery()
 
         stmt = select(aggregated).where(aggregated.c.distribution_id == str(distribution_id))
