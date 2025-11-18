@@ -16,10 +16,6 @@ class UoWMiddleware(BaseMiddleware):
     ) -> Any:
 
         logging.info(f'{', '.join(data.keys())}')
-    
-        if event.chat.type != ChatType.PRIVATE.value:
-            return
-
         uow = get_uow()
         async with uow:
             data['uow'] = uow
