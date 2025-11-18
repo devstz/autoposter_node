@@ -385,10 +385,11 @@ class SQLAlchemyPostRepository:
 
     async def count_distributions(self) -> int:
         username_expr = func.coalesce(Post.source_channel_username, "")
-        channel_expr = func.coalesce(Post.source_channel_id, 0)
+        # Используем source_channel_id напрямую в GROUP BY, чтобы NULL значения группировались отдельно
+        # Это предотвращает объединение разных рассылок с NULL в одну группу
         grouped = (
-            select(username_expr, channel_expr, Post.source_message_id)
-            .group_by(username_expr, channel_expr, Post.source_message_id)
+            select(username_expr, Post.source_channel_id, Post.source_message_id)
+            .group_by(username_expr, Post.source_channel_id, Post.source_message_id)
         ).subquery()
         stmt = select(func.count()).select_from(grouped)
         res = await self.__session.execute(stmt)
@@ -397,11 +398,12 @@ class SQLAlchemyPostRepository:
 
     async def list_distributions(self, *, limit: int, offset: int) -> list[dict]:
         username_expr = func.coalesce(Post.source_channel_username, "")
-        channel_expr = func.coalesce(Post.source_channel_id, 0)
+        # Используем source_channel_id напрямую в GROUP BY, чтобы NULL значения группировались отдельно
+        # Это предотвращает объединение разных рассылок с NULL в одну группу
 
         aggregated = (
             select(
-                func.min(cast(Post.id, String)).label("distribution_id"),  # <-- исправлено
+                func.min(Post.id).label("distribution_id"),
                 func.max(Post.source_channel_username).label("source_channel_username"),
                 func.max(Post.source_channel_id).label("source_channel_id"),
                 func.max(Post.distribution_name).label("distribution_name"),
@@ -415,12 +417,12 @@ class SQLAlchemyPostRepository:
                 func.sum(case((Post.status == PostStatus.ERROR.value, 1), else_=0)).label("error_count"),
                 func.sum(case((Post.status == PostStatus.DONE.value, 1), else_=0)).label("done_count"),
             )
-            .group_by(username_expr, channel_expr, Post.source_message_id)
+            .group_by(username_expr, Post.source_channel_id, Post.source_message_id)
         ).subquery()
 
         stmt = (
             select(aggregated)
-            .order_by(aggregated.c.created_at.desc())
+            .order_by(aggregated.c.created_at.desc().nulls_last())
             .limit(limit)
             .offset(offset)
         )
@@ -429,11 +431,12 @@ class SQLAlchemyPostRepository:
 
     async def get_distribution_summary(self, distribution_id: UUID) -> dict | None:
         username_expr = func.coalesce(Post.source_channel_username, "")
-        channel_expr = func.coalesce(Post.source_channel_id, 0)
+        # Используем source_channel_id напрямую в GROUP BY, чтобы NULL значения группировались отдельно
+        # Это предотвращает объединение разных рассылок с NULL в одну группу
 
         aggregated = (
             select(
-                func.min(cast(Post.id, String)).label("distribution_id"),
+                func.min(Post.id).label("distribution_id"),
                 func.max(Post.source_channel_username).label("source_channel_username"),
                 func.max(Post.source_channel_id).label("source_channel_id"),
                 func.max(Post.distribution_name).label("distribution_name"),
@@ -447,10 +450,10 @@ class SQLAlchemyPostRepository:
                 func.sum(case((Post.status == PostStatus.ERROR.value, 1), else_=0)).label("error_count"),
                 func.sum(case((Post.status == PostStatus.DONE.value, 1), else_=0)).label("done_count"),
             )
-            .group_by(username_expr, channel_expr, Post.source_message_id)
+            .group_by(username_expr, Post.source_channel_id, Post.source_message_id)
         ).subquery()
 
-        stmt = select(aggregated).where(aggregated.c.distribution_id == str(distribution_id))
+        stmt = select(aggregated).where(aggregated.c.distribution_id == distribution_id)
         res = await self.__session.execute(stmt)
         row = res.first()
         if row is None:
