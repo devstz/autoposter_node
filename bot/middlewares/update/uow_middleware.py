@@ -1,7 +1,8 @@
 from typing import Any, Awaitable, Callable
 
 from aiogram import BaseMiddleware
-from aiogram.types import TelegramObject
+from aiogram.types import TelegramObject, Chat
+from aiogram.enums.chat_type import ChatType
 
 from infra.db.uow import get_uow
 
@@ -13,6 +14,10 @@ class UoWMiddleware(BaseMiddleware):
         event: TelegramObject,
         data: dict[str, Any]
     ) -> Any:
+        chat: Chat | None = data.get("event_from_chat")
+        if not chat or chat.type != ChatType.PRIVATE:
+            return
+
         uow = get_uow()
         async with uow:
             data['uow'] = uow
