@@ -403,7 +403,7 @@ class SQLAlchemyPostRepository:
 
         aggregated = (
             select(
-                func.min(Post.id).label("distribution_id"),
+                func.min(cast(Post.id, String)).label("distribution_id"),
                 func.max(Post.source_channel_username).label("source_channel_username"),
                 func.max(Post.source_channel_id).label("source_channel_id"),
                 func.max(Post.distribution_name).label("distribution_name"),
@@ -436,7 +436,7 @@ class SQLAlchemyPostRepository:
 
         aggregated = (
             select(
-                func.min(Post.id).label("distribution_id"),
+                func.min(cast(Post.id, String)).label("distribution_id"),
                 func.max(Post.source_channel_username).label("source_channel_username"),
                 func.max(Post.source_channel_id).label("source_channel_id"),
                 func.max(Post.distribution_name).label("distribution_name"),
@@ -453,7 +453,7 @@ class SQLAlchemyPostRepository:
             .group_by(username_expr, Post.source_channel_id, Post.source_message_id)
         ).subquery()
 
-        stmt = select(aggregated).where(aggregated.c.distribution_id == distribution_id)
+        stmt = select(aggregated).where(aggregated.c.distribution_id == str(distribution_id))
         res = await self.__session.execute(stmt)
         row = res.first()
         if row is None:
