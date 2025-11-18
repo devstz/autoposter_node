@@ -384,12 +384,11 @@ class SQLAlchemyPostRepository:
         return len(res.fetchall())
 
     async def count_distributions(self) -> int:
-        # Используем source_channel_username и source_channel_id напрямую в GROUP BY
-        # Поле source_channel_username не может быть NULL (nullable=False), поэтому COALESCE не нужен
-        # Это обеспечивает консистентность между GROUP BY и SELECT
+        # Группируем по distribution_name: если у постов одинаковое название рассылки, это одна рассылка
+        # NULL значения distribution_name группируются отдельно
         grouped = (
-            select(Post.source_channel_username, Post.source_channel_id, Post.source_message_id)
-            .group_by(Post.source_channel_username, Post.source_channel_id, Post.source_message_id)
+            select(Post.distribution_name)
+            .group_by(Post.distribution_name)
         ).subquery()
         stmt = select(func.count()).select_from(grouped)
         res = await self.__session.execute(stmt)
@@ -397,18 +396,17 @@ class SQLAlchemyPostRepository:
         return int(scalar or 0)
 
     async def list_distributions(self, *, limit: int, offset: int) -> list[dict]:
-        # Используем source_channel_username и source_channel_id напрямую в GROUP BY
-        # Поле source_channel_username не может быть NULL (nullable=False), поэтому COALESCE не нужен
-        # Это обеспечивает консистентность между GROUP BY и SELECT
+        # Группируем по distribution_name: если у постов одинаковое название рассылки, это одна рассылка
+        # NULL значения distribution_name группируются отдельно
 
         aggregated = (
             select(
                 func.min(cast(Post.id, String)).label("distribution_id"),
                 func.max(Post.source_channel_username).label("source_channel_username"),
                 func.max(Post.source_channel_id).label("source_channel_id"),
-                func.max(Post.distribution_name).label("distribution_name"),
+                Post.distribution_name.label("distribution_name"),
                 func.bool_and(Post.notify_on_failure).label("notify_on_failure"),
-                Post.source_message_id.label("source_message_id"),
+                func.max(Post.source_message_id).label("source_message_id"),
                 func.min(Post.created_at).label("created_at"),
                 func.max(Post.updated_at).label("updated_at"),
                 func.count(Post.id).label("total_posts"),
@@ -417,7 +415,7 @@ class SQLAlchemyPostRepository:
                 func.sum(case((Post.status == PostStatus.ERROR.value, 1), else_=0)).label("error_count"),
                 func.sum(case((Post.status == PostStatus.DONE.value, 1), else_=0)).label("done_count"),
             )
-            .group_by(Post.source_channel_username, Post.source_channel_id, Post.source_message_id)
+            .group_by(Post.distribution_name)
         ).subquery()
 
         stmt = (
@@ -430,18 +428,23 @@ class SQLAlchemyPostRepository:
         return [dict(row._mapping) for row in res.fetchall()]
 
     async def get_distribution_summary(self, distribution_id: UUID) -> dict | None:
-        # Используем source_channel_username и source_channel_id напрямую в GROUP BY
-        # Поле source_channel_username не может быть NULL (nullable=False), поэтому COALESCE не нужен
-        # Это обеспечивает консистентность между GROUP BY и SELECT
+        # Группируем по distribution_name: если у постов одинаковое название рассылки, это одна рассылка
+        # NULL значения distribution_name группируются отдельно
+        # Сначала находим пост по distribution_id, чтобы получить его distribution_name
+        post = await self.get(distribution_id)
+        if post is None:
+            return None
+        
+        distribution_name = post.distribution_name
 
         aggregated = (
             select(
                 func.min(cast(Post.id, String)).label("distribution_id"),
                 func.max(Post.source_channel_username).label("source_channel_username"),
                 func.max(Post.source_channel_id).label("source_channel_id"),
-                func.max(Post.distribution_name).label("distribution_name"),
+                Post.distribution_name.label("distribution_name"),
                 func.bool_and(Post.notify_on_failure).label("notify_on_failure"),
-                Post.source_message_id.label("source_message_id"),
+                func.max(Post.source_message_id).label("source_message_id"),
                 func.min(Post.created_at).label("created_at"),
                 func.max(Post.updated_at).label("updated_at"),
                 func.count(Post.id).label("total_posts"),
@@ -450,10 +453,14 @@ class SQLAlchemyPostRepository:
                 func.sum(case((Post.status == PostStatus.ERROR.value, 1), else_=0)).label("error_count"),
                 func.sum(case((Post.status == PostStatus.DONE.value, 1), else_=0)).label("done_count"),
             )
-            .group_by(Post.source_channel_username, Post.source_channel_id, Post.source_message_id)
+            .group_by(Post.distribution_name)
         ).subquery()
 
-        stmt = select(aggregated).where(aggregated.c.distribution_id == str(distribution_id))
+        # Ищем рассылку по distribution_name
+        if distribution_name is None:
+            stmt = select(aggregated).where(aggregated.c.distribution_name.is_(None))
+        else:
+            stmt = select(aggregated).where(aggregated.c.distribution_name == distribution_name)
         res = await self.__session.execute(stmt)
         row = res.first()
         if row is None:
