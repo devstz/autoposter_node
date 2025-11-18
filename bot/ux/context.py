@@ -262,11 +262,8 @@ class AdminUX:
         return "\n".join(filter(None, lines))
 
     def distribution_target_prompt_text(self, mode: str, name: str | None = None) -> str:
-        mode_hint = (
-            self._distributions_texts.get("mode_create_hint")
-            if mode == "create"
-            else self._distributions_texts.get("mode_replace_hint", "")
-        )
+        # Всегда показываем предупреждение о замене постов
+        mode_hint = self._distributions_texts.get("mode_replace_hint", "")
         lines = [
             self._distributions_texts.get("create_title", ""),
             self._format_selected_name(name),

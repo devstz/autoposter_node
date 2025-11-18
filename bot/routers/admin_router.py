@@ -1128,7 +1128,7 @@ class AdminRouter(BaseRouter):
             await state.set_state(AdminStates.DISTRIBUTION_WAIT_NAME)
             await state.update_data(
                 dist_name=None,
-                dist_mode=None,
+                dist_mode="replace",
                 dist_target=None,
                 dist_groups=[],
                 dist_selected_bots=[],
@@ -1148,9 +1148,8 @@ class AdminRouter(BaseRouter):
         @self.callback_query(AdminDistributionsCallback.filter(F.action == AdminDistributionsAction.NAME_AUTO))
         async def dist_name_auto(callback: CallbackQuery, state: FSMContext, ux: UXContext):
             auto_name = self._generate_distribution_name()
-            await state.update_data(dist_name=auto_name)
-            await state.set_state(AdminStates.DISTRIBUTION_WAIT_MODE)
-            await self._render_distribution_mode(callback, ux, name=auto_name)
+            await state.update_data(dist_name=auto_name, dist_mode="replace")
+            await self._render_distribution_target(callback, ux, mode="replace", name=auto_name)
             await callback.answer(ux.admin.distribution_name_autoset_text(auto_name), show_alert=False)
 
         # выбор режима create / replace
@@ -1169,9 +1168,8 @@ class AdminRouter(BaseRouter):
         @self.callback_query(AdminDistributionsCallback.filter(F.action == AdminDistributionsAction.SELECT_TARGET))
         async def dist_select_target(callback: CallbackQuery, state: FSMContext, ux: UXContext):
             data = await state.get_data()
-            mode = data.get("dist_mode") or "create"
-            await state.set_state(AdminStates.DISTRIBUTION_WAIT_MODE)
-            await state.update_data(dist_summary_prefix="")
+            mode = "replace"
+            await state.update_data(dist_mode="replace", dist_summary_prefix="")
             await self._render_distribution_target(callback, ux, mode=mode, name=data.get("dist_name"))
 
         # установка цели
@@ -1188,8 +1186,8 @@ class AdminRouter(BaseRouter):
                 return
             target = callback_data.target
             data = await state.get_data()
-            mode = data.get("dist_mode") or "create"
-            await state.update_data(dist_target=target, dist_groups=[])
+            mode = "replace"
+            await state.update_data(dist_target=target, dist_groups=[], dist_mode="replace")
 
             # 1) выбор групп вручную
             if target == "groups":
@@ -1447,9 +1445,8 @@ class AdminRouter(BaseRouter):
             if not name:
                 await message.answer(ux.admin.distribution_name_invalid_text())
                 return
-            await state.update_data(dist_name=name)
-            await state.set_state(AdminStates.DISTRIBUTION_WAIT_MODE)
-            await self._render_distribution_mode(message, ux, name=name)
+            await state.update_data(dist_name=name, dist_mode="replace")
+            await self._render_distribution_target(message, ux, mode="replace", name=name)
 
         @self.message(AdminStates.DISTRIBUTION_WAIT_GROUP_IDS)
         async def distribution_receive_group_ids(
