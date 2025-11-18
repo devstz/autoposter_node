@@ -5,7 +5,7 @@ from aiogram.types import TelegramObject, Chat
 from aiogram.enums.chat_type import ChatType
 
 from infra.db.uow import get_uow
-import logging
+
 
 class UoWMiddleware(BaseMiddleware):
     async def __call__(
@@ -15,7 +15,10 @@ class UoWMiddleware(BaseMiddleware):
         data: dict[str, Any]
     ) -> Any:
 
-        logging.info(f'{', '.join(data.keys())}')
+        chat: Chat = data['event_chat']
+        if chat.type != ChatType.PRIVATE.value:
+            return
+
         uow = get_uow()
         async with uow:
             data['uow'] = uow
