@@ -14,10 +14,9 @@ class UoWMiddleware(BaseMiddleware):
         event: TelegramObject,
         data: dict[str, Any]
     ) -> Any:
-        
+
         chat: Chat = data['event_from_chat']
-        if chat.type != ChatType.PRIVATE.value:
-            return
+        
 
         uow = get_uow()
         async with uow:
