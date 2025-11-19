@@ -1,5 +1,4 @@
 import asyncio
-import ssl
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy import text
 import os
@@ -12,12 +11,9 @@ async def main():
         print("❌ DATABASE_URL не найден в окружении")
         return
 
-    ssl_context = ssl.create_default_context()
-
     engine = create_async_engine(
         database_url,
         echo=False,
-        connect_args={"ssl": ssl_context},
     )
 
     SessionFactory = async_sessionmaker(  # type: ignore
