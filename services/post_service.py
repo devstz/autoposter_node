@@ -156,14 +156,10 @@ class PostService:
     async def delete_distribution(
         self,
         *,
-        source_channel_username: str | None,
-        source_channel_id: int | None,
-        source_message_id: int,
+        distribution_name: str | None,
     ) -> int:
         return await self._uow.post_repo.delete_distribution(
-            source_channel_username=source_channel_username,
-            source_channel_id=source_channel_id,
-            source_message_id=source_message_id,
+            distribution_name=distribution_name,
         )
 
     async def pause(self, post_id: UUID) -> None:
@@ -240,9 +236,7 @@ class PostService:
         if summary is None:
             return 0
         return await self._uow.post_repo.delete_distribution_groups(
-            source_channel_username=summary.get("source_channel_username"),
-            source_channel_id=summary.get("source_channel_id"),
-            source_message_id=summary.get("source_message_id"),
+            distribution_name=summary.get("distribution_name"),
             group_ids=group_ids,
         )
 

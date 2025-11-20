@@ -572,28 +572,9 @@ class AdminRouter(BaseRouter):
                 await self._render_distributions_list(callback, ux, page=page)
                 return
 
-            source_message_id = summary.get("source_message_id")
-            if source_message_id is None:
-                await callback.answer("Не удалось определить рассылку", show_alert=True)
-                return
-
-            try:
-                normalized_message_id = int(source_message_id)
-            except (TypeError, ValueError):
-                await callback.answer("Не удалось определить рассылку", show_alert=True)
-                return
-
-            source_channel_id = summary.get("source_channel_id")
-            try:
-                normalized_channel_id = int(source_channel_id) if source_channel_id is not None else None
-            except (TypeError, ValueError):
-                normalized_channel_id = None
-
-            source_username = summary.get("source_channel_username")
+            distribution_name = summary.get("distribution_name")
             deleted = await post_service.delete_distribution(
-                source_channel_username=source_username,
-                source_channel_id=normalized_channel_id,
-                source_message_id=normalized_message_id,
+                distribution_name=distribution_name,
             )
 
             if deleted == 0:

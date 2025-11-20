@@ -235,40 +235,31 @@ class SQLAlchemyPostRepository:
     async def delete_distribution(
         self,
         *,
-        source_channel_username: str | None,
-        source_channel_id: int | None,
-        source_message_id: int,
+        distribution_name: str | None,
     ) -> int:
-        """Delete posts that belong to the same source message (distribution)."""
-        conditions = self._distribution_filters(
-            source_channel_username=source_channel_username,
-            source_channel_id=source_channel_id,
-            source_message_id=source_message_id,
-        )
-        res = await self.__session.execute(
-            sa_delete(Post)
-            .where(and_(*conditions))
-            .returning(Post.id)
-        )
+        """Delete posts that belong to the same distribution name."""
+        if distribution_name is None:
+            stmt = sa_delete(Post).where(Post.distribution_name.is_(None))
+        else:
+            stmt = sa_delete(Post).where(Post.distribution_name == distribution_name)
+        res = await self.__session.execute(stmt.returning(Post.id))
         await self.__session.flush()
         return len(res.fetchall())
 
     async def delete_distribution_groups(
         self,
         *,
-        source_channel_username: str | None,
-        source_channel_id: int | None,
-        source_message_id: int,
+        distribution_name: str | None,
         group_ids: list[UUID],
     ) -> int:
+        """Delete posts that belong to the same distribution name and specified groups."""
         if not group_ids:
             return 0
-        conditions = self._distribution_filters(
-            source_channel_username=source_channel_username,
-            source_channel_id=source_channel_id,
-            source_message_id=source_message_id,
-        )
-        conditions.append(Post.group_id.in_(group_ids))
+        conditions = [Post.group_id.in_(group_ids)]
+        if distribution_name is None:
+            conditions.append(Post.distribution_name.is_(None))
+        else:
+            conditions.append(Post.distribution_name == distribution_name)
         res = await self.__session.execute(
             sa_delete(Post)
             .where(and_(*conditions))
