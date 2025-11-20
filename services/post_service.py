@@ -115,41 +115,29 @@ class PostService:
     async def bulk_pause_distribution(
         self,
         *,
-        source_channel_username: str | None,
-        source_channel_id: int | None,
-        source_message_id: int,
+        distribution_name: str | None,
     ) -> int:
         return await self._uow.post_repo.bulk_pause_by_distribution(
-            source_channel_username=source_channel_username,
-            source_channel_id=source_channel_id,
-            source_message_id=source_message_id,
+            distribution_name=distribution_name,
         )
 
     async def bulk_resume_distribution(
         self,
         *,
-        source_channel_username: str | None,
-        source_channel_id: int | None,
-        source_message_id: int,
+        distribution_name: str | None,
     ) -> int:
         return await self._uow.post_repo.bulk_resume_by_distribution(
-            source_channel_username=source_channel_username,
-            source_channel_id=source_channel_id,
-            source_message_id=source_message_id,
+            distribution_name=distribution_name,
         )
 
     async def bulk_set_notify_distribution(
         self,
         *,
-        source_channel_username: str | None,
-        source_channel_id: int | None,
-        source_message_id: int,
+        distribution_name: str | None,
         value: bool,
     ) -> int:
         return await self._uow.post_repo.bulk_set_notify_by_distribution(
-            source_channel_username=source_channel_username,
-            source_channel_id=source_channel_id,
-            source_message_id=source_message_id,
+            distribution_name=distribution_name,
             value=value,
         )
 
@@ -166,13 +154,12 @@ class PostService:
         await self._uow.post_repo.pause(post_id)
 
     async def resolve_distribution_id_by_post(self, post_id: UUID) -> UUID | None:
+        """Resolve distribution_id by post_id using distribution_name."""
         post = await self._uow.post_repo.get(post_id)
         if post is None:
             return None
-        return await self._uow.post_repo.resolve_distribution_id_by_source(
-            source_channel_username=post.source_channel_username,
-            source_channel_id=post.source_channel_id,
-            source_message_id=post.source_message_id,
+        return await self._uow.post_repo.resolve_distribution_id_by_name(
+            distribution_name=post.distribution_name,
         )
 
     async def resume(self, post_id: UUID) -> None:
@@ -190,14 +177,10 @@ class PostService:
     async def list_distribution_posts(
         self,
         *,
-        source_channel_username: str | None,
-        source_channel_id: int | None,
-        source_message_id: int,
+        distribution_name: str | None,
     ):
         posts = await self._uow.post_repo.list_distribution_posts(
-            source_channel_username=source_channel_username,
-            source_channel_id=source_channel_id,
-            source_message_id=source_message_id,
+            distribution_name=distribution_name,
         )
         return [PostDTO.from_model(post) for post in posts]
 
@@ -208,16 +191,15 @@ class PostService:
         source_message_id = summary.get("source_message_id")
         if source_message_id is None:
             return None
+        distribution_name = summary.get("distribution_name")
         config = await self._uow.post_repo.get_distribution_config(
-            source_channel_username=summary.get("source_channel_username"),
-            source_channel_id=summary.get("source_channel_id"),
-            source_message_id=source_message_id,
+            distribution_name=distribution_name,
         )
         if config is None:
             return None
         return DistributionContextDTO(
             distribution_id=distribution_id,
-            name=summary.get("distribution_name"),
+            name=distribution_name,
             source_channel_username=summary.get("source_channel_username"),
             source_channel_id=summary.get("source_channel_id"),
             source_message_id=int(source_message_id),

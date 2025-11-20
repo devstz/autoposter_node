@@ -449,37 +449,16 @@ class AdminRouter(BaseRouter):
                 await callback.answer("Рассылка не найдена", show_alert=True)
                 return
 
-            source_message_id = summary.get("source_message_id")
-            if source_message_id is None:
-                await callback.answer("Не удалось определить рассылку", show_alert=True)
-                return
-
-            try:
-                normalized_message_id = int(source_message_id)
-            except (TypeError, ValueError):
-                await callback.answer("Не удалось определить рассылку", show_alert=True)
-                return
-
-            source_channel_id = summary.get("source_channel_id")
-            try:
-                normalized_channel_id = int(source_channel_id) if source_channel_id is not None else None
-            except (TypeError, ValueError):
-                normalized_channel_id = None
-
-            source_username = summary.get("source_channel_username")
+            distribution_name = summary.get("distribution_name")
 
             if choice == "pause":
                 affected = await post_service.bulk_pause_distribution(
-                    source_channel_username=source_username,
-                    source_channel_id=normalized_channel_id,
-                    source_message_id=normalized_message_id,
+                    distribution_name=distribution_name,
                 )
                 feedback = "Нет активных рассылок для остановки" if affected == 0 else f"Остановлено {affected} пост(ов)"
             else:
                 affected = await post_service.bulk_resume_distribution(
-                    source_channel_username=source_username,
-                    source_channel_id=normalized_channel_id,
-                    source_message_id=normalized_message_id,
+                    distribution_name=distribution_name,
                 )
                 feedback = "Нет рассылок для запуска" if affected == 0 else f"Запущено {affected} пост(ов)"
 
@@ -513,29 +492,10 @@ class AdminRouter(BaseRouter):
                 await callback.answer("Рассылка не найдена", show_alert=True)
                 return
 
-            source_message_id = summary.get("source_message_id")
-            if source_message_id is None:
-                await callback.answer("Не удалось определить рассылку", show_alert=True)
-                return
-
-            try:
-                normalized_message_id = int(source_message_id)
-            except (TypeError, ValueError):
-                await callback.answer("Не удалось определить рассылку", show_alert=True)
-                return
-
-            source_channel_id = summary.get("source_channel_id")
-            try:
-                normalized_channel_id = int(source_channel_id) if source_channel_id is not None else None
-            except (TypeError, ValueError):
-                normalized_channel_id = None
-
-            source_username = summary.get("source_channel_username")
+            distribution_name = summary.get("distribution_name")
             value = choice == "on"
             affected = await post_service.bulk_set_notify_distribution(
-                source_channel_username=source_username,
-                source_channel_id=normalized_channel_id,
-                source_message_id=normalized_message_id,
+                distribution_name=distribution_name,
                 value=value,
             )
 
@@ -1381,14 +1341,12 @@ class AdminRouter(BaseRouter):
                 await state.clear()
                 return
             summary = await post_service.get_distribution_summary(dist_id)
-            if summary is None or summary.get("source_message_id") is None:
+            if summary is None:
                 await message.answer("Рассылка не найдена")
                 await state.clear()
                 return
             posts = await post_service.list_distribution_posts(
-                source_channel_username=summary.get("source_channel_username"),
-                source_channel_id=summary.get("source_channel_id"),
-                source_message_id=summary.get("source_message_id"),
+                distribution_name=summary.get("distribution_name"),
             )
             existing_ids = {str(post.group_id) for post in posts if post.group_id}
             usage_map = await post_service.groups_distribution_usage([group.id for group in groups])
@@ -1728,12 +1686,10 @@ class AdminRouter(BaseRouter):
         if data.get("dist_edit_bindings_items"):
             return
         summary = await post_service.get_distribution_summary(distribution_id)
-        if summary is None or summary.get("source_message_id") is None:
+        if summary is None:
             return
         posts = await post_service.list_distribution_posts(
-            source_channel_username=summary.get("source_channel_username"),
-            source_channel_id=summary.get("source_channel_id"),
-            source_message_id=summary.get("source_message_id"),
+            distribution_name=summary.get("distribution_name"),
         )
         existing_ids = {str(post.group_id) for post in posts if post.group_id}
         groups = await group_service.list_bound(limit=2000)

@@ -169,16 +169,14 @@ class SQLAlchemyPostRepository:
     async def bulk_pause_by_distribution(
         self,
         *,
-        source_channel_username: str | None,
-        source_channel_id: int | None,
-        source_message_id: int,
+        distribution_name: str | None,
     ) -> int:
-        conditions = self._distribution_filters(
-            source_channel_username=source_channel_username,
-            source_channel_id=source_channel_id,
-            source_message_id=source_message_id,
-        )
-        conditions.append(Post.status == PostStatus.ACTIVE.value)
+        """Pause all active posts in a distribution by name."""
+        conditions = [Post.status == PostStatus.ACTIVE.value]
+        if distribution_name is None:
+            conditions.append(Post.distribution_name.is_(None))
+        else:
+            conditions.append(Post.distribution_name == distribution_name)
         res = await self.__session.execute(
             update(Post)
             .where(and_(*conditions))
@@ -191,16 +189,14 @@ class SQLAlchemyPostRepository:
     async def bulk_resume_by_distribution(
         self,
         *,
-        source_channel_username: str | None,
-        source_channel_id: int | None,
-        source_message_id: int,
+        distribution_name: str | None,
     ) -> int:
-        conditions = self._distribution_filters(
-            source_channel_username=source_channel_username,
-            source_channel_id=source_channel_id,
-            source_message_id=source_message_id,
-        )
-        conditions.append(Post.status.in_((PostStatus.PAUSED.value, PostStatus.ERROR.value)))
+        """Resume all paused/error posts in a distribution by name."""
+        conditions = [Post.status.in_((PostStatus.PAUSED.value, PostStatus.ERROR.value))]
+        if distribution_name is None:
+            conditions.append(Post.distribution_name.is_(None))
+        else:
+            conditions.append(Post.distribution_name == distribution_name)
         res = await self.__session.execute(
             update(Post)
             .where(and_(*conditions))
@@ -213,16 +209,15 @@ class SQLAlchemyPostRepository:
     async def bulk_set_notify_by_distribution(
         self,
         *,
-        source_channel_username: str | None,
-        source_channel_id: int | None,
-        source_message_id: int,
+        distribution_name: str | None,
         value: bool,
     ) -> int:
-        conditions = self._distribution_filters(
-            source_channel_username=source_channel_username,
-            source_channel_id=source_channel_id,
-            source_message_id=source_message_id,
-        )
+        """Set notify_on_failure for all posts in a distribution by name."""
+        conditions = []
+        if distribution_name is None:
+            conditions.append(Post.distribution_name.is_(None))
+        else:
+            conditions.append(Post.distribution_name == distribution_name)
         res = await self.__session.execute(
             update(Post)
             .where(and_(*conditions))
@@ -268,22 +263,17 @@ class SQLAlchemyPostRepository:
         await self.__session.flush()
         return len(res.fetchall())
 
-    async def resolve_distribution_id_by_source(
+    async def resolve_distribution_id_by_name(
         self,
         *,
-        source_channel_username: str | None,
-        source_channel_id: int | None,
-        source_message_id: int,
+        distribution_name: str | None,
     ) -> UUID | None:
-        conditions = self._distribution_filters(
-            source_channel_username=source_channel_username,
-            source_channel_id=source_channel_id,
-            source_message_id=source_message_id,
-        )
-        stmt = (
-            select(func.min(cast(Post.id, String)))
-            .where(and_(*conditions))
-        )
+        """Resolve distribution_id by distribution_name (returns min post id for that distribution)."""
+        stmt = select(func.min(cast(Post.id, String)))
+        if distribution_name is None:
+            stmt = stmt.where(Post.distribution_name.is_(None))
+        else:
+            stmt = stmt.where(Post.distribution_name == distribution_name)
         res = await self.__session.execute(stmt)
         raw = res.scalar()
         if not raw:
@@ -461,15 +451,14 @@ class SQLAlchemyPostRepository:
     async def get_distribution_config(
         self,
         *,
-        source_channel_username: str | None,
-        source_channel_id: int | None,
-        source_message_id: int,
+        distribution_name: str | None,
     ) -> dict | None:
-        conditions = self._distribution_filters(
-            source_channel_username=source_channel_username,
-            source_channel_id=source_channel_id,
-            source_message_id=source_message_id,
-        )
+        """Get configuration for a distribution by name."""
+        conditions = []
+        if distribution_name is None:
+            conditions.append(Post.distribution_name.is_(None))
+        else:
+            conditions.append(Post.distribution_name == distribution_name)
         stmt = (
             select(
                 Post.pause_between_attempts_s.label("pause_between_attempts_s"),
@@ -491,24 +480,17 @@ class SQLAlchemyPostRepository:
     async def list_distribution_posts(
         self,
         *,
-        source_channel_username: str | None,
-        source_channel_id: int | None,
-        source_message_id: int,
+        distribution_name: str | None,
     ) -> list[Post]:
+        """List all posts in a distribution by name."""
         stmt = (
             select(Post)
             .options(selectinload(Post.group), selectinload(Post.bot))
-            .where(Post.source_message_id == source_message_id)
         )
-        if source_channel_username:
-            stmt = stmt.where(Post.source_channel_username == source_channel_username)
+        if distribution_name is None:
+            stmt = stmt.where(Post.distribution_name.is_(None))
         else:
-            stmt = stmt.where(Post.source_channel_username.is_(None))
-
-        if source_channel_id is not None:
-            stmt = stmt.where(Post.source_channel_id == source_channel_id)
-        else:
-            stmt = stmt.where(Post.source_channel_id.is_(None))
+            stmt = stmt.where(Post.distribution_name == distribution_name)
 
         stmt = stmt.order_by(Post.created_at.desc())
         res = await self.__session.execute(stmt)

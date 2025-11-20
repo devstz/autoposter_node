@@ -38,9 +38,7 @@ class ShowDistributionGroupsUseCase:
             raise RuntimeError("Settings profile is not configured")
 
         posts = await self._post_service.list_distribution_posts(
-            source_channel_username=summary.get("source_channel_username"),
-            source_channel_id=summary.get("source_channel_id"),
-            source_message_id=summary.get("source_message_id"),
+            distribution_name=summary.get("distribution_name"),
         )
         await self._ensure_groups_metadata(posts)
 
