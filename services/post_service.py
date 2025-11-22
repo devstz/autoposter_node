@@ -91,6 +91,10 @@ class PostService:
     async def touch_attempt_time(self, post_id: UUID) -> None:
         await self._uow.post_repo.touch_attempt_time(post_id)
 
+    async def increment_attempt_count(self, post_id: UUID) -> None:
+        """Atomically increment count_attempts and update last_attempt_at."""
+        await self._uow.post_repo.increment_attempt_count(post_id)
+
     async def list_by_bot(self, bot_id: UUID, *, limit: int = 100, offset: int = 0):
         posts = await self._uow.post_repo.list_by_bot(bot_id, limit=limit, offset=offset)
         return posts

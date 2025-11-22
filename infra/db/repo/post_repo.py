@@ -304,6 +304,18 @@ class SQLAlchemyPostRepository:
         )
         await self.__session.flush()
 
+    async def increment_attempt_count(self, post_id: UUID) -> None:
+        """Atomically increment count_attempts and update last_attempt_at."""
+        await self.__session.execute(
+            update(Post)
+            .where(Post.id == post_id)
+            .values(
+                count_attempts=Post.count_attempts + 1,
+                last_attempt_at=datetime.now(timezone.utc)
+            )
+        )
+        await self.__session.flush()
+
     async def list_by_bot(self, bot_id: UUID, *, limit: int = 100, offset: int = 0) -> list[Post]:
         # Fetch posts by groups permanently assigned to the bot
         stmt = (

@@ -94,13 +94,13 @@ class PostingRunner:
             for i, post in enumerate(ready_posts):
                 # Перед отправкой заново проверяем готовность (могла измениться)
                 if self._is_post_ready(post):
-                    await self._process_post(bot, post)
+                    await self._process_post(bot, post, post_service)
                 
                 # Задержка после всех постов кроме последнего
                 if i < len(ready_posts) - 1:
                     await sleep(delay)
 
-    async def _process_post(self, bot: BotDB, post: Post) -> None:
+    async def _process_post(self, bot: BotDB, post: Post, post_service: PostService) -> None:
         """Отправляет пост в Telegram (без проверок готовности)"""
         try:
             # Удаляем предыдущую попытку, если требуется
@@ -142,12 +142,14 @@ class PostingRunner:
                 # Если это другая IntegrityError, пробрасываем дальше
                 raise
             
-            # Обновляем счетчики и статус
-            post.count_attempts += 1
+            # Обновляем счетчики и статус через сервис (избегаем StaleDataError)
+            await post_service.increment_attempt_count(post.id)
             await self.posting_service.pin_post(post, tg_msg)
-            post.last_attempt_at = datetime.now(timezone.utc)
-            if post.target_attempts >= 0 and post.count_attempts >= post.target_attempts:
-                post.status = PostStatus.DONE.value
+            
+            # Проверяем, нужно ли отметить пост как выполненный
+            # Используем текущие значения поста, т.к. мы только что увеличили count_attempts на 1
+            if post.target_attempts >= 0 and (post.count_attempts + 1) >= post.target_attempts:
+                await post_service.mark_done(post.id)
         except Exception as e:
             # Классифицируем ошибку
             error_type = classify_telegram_error(e)
