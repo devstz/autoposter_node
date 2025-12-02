@@ -25,10 +25,11 @@ from .posting_service import PostingService
 from asyncio import sleep
 
 from logging import getLogger
+from config.settings import get_settings
 
 logger = getLogger('PostingRunner')
 
-SLEEP_INTERVAL_SECONDS = 5
+SLEEP_INTERVAL_SECONDS = 5 
 
 
 class PostingRunner:
@@ -38,6 +39,7 @@ class PostingRunner:
         self.notification_service = NotificationService(self.tg_bot)
         self.sleep_interval = SLEEP_INTERVAL_SECONDS
         self.running = True
+        self.settings = get_settings()
 
     async def start(self, stop_event: asyncio.Event) -> None:
         while True:
@@ -81,16 +83,13 @@ class PostingRunner:
             if not ready_posts:
                 return
             
-            # Находим минимальную паузу среди готовых постов
-            min_pause = min(post.pause_between_attempts_s for post in ready_posts)
+            # Отправляем посты с лимитом из настроек
+            MAX_POSTS_PER_SECOND = self.settings.MAX_POSTS_PER_SECOND
+            DELAY_BETWEEN_POSTS = 1.0 / MAX_POSTS_PER_SECOND
             
-            # Рассчитываем задержку между отправками
-            # Минимум 0.04 сек (25 постов/сек) для соблюдения Telegram API limits
-            delay = max(min_pause / len(ready_posts), 0.04)
+            logger.info(f"Sending {len(ready_posts)} posts with rate limit {MAX_POSTS_PER_SECOND} posts/sec")
             
-            logger.info(f"Sending {len(ready_posts)} posts with delay {delay:.2f}s (min_pause={min_pause}s)")
-            
-            # Отправляем посты последовательно с задержкой
+            # Отправляем посты последовательно с задержкой для соблюдения лимита
             for i, post in enumerate(ready_posts):
                 # Перед отправкой заново проверяем готовность (могла измениться)
                 if self._is_post_ready(post):
@@ -98,7 +97,7 @@ class PostingRunner:
                 
                 # Задержка после всех постов кроме последнего
                 if i < len(ready_posts) - 1:
-                    await sleep(delay)
+                    await sleep(DELAY_BETWEEN_POSTS)
 
     async def _process_post(self, bot: BotDB, post: Post, post_service: PostService) -> None:
         """Отправляет пост в Telegram (без проверок готовности)"""

@@ -16,6 +16,7 @@ class Config(BaseSettings):
     GIT_REMOTE: str = "origin"
     GIT_BRANCH: str = "main"
     GIT_CHECK_INTERVAL_S: int = 300
+    MAX_POSTS_PER_SECOND: int = 8  # Максимальное количество постов в секунду
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
