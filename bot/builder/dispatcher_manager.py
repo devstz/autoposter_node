@@ -78,3 +78,12 @@ class DispatcherManager:
             )
         except Exception as e:
             logger.error(f"Update processing error: {str(e)}")
+
+    async def close(self) -> None:
+        """Закрывает dispatcher и его ресурсы."""
+        try:
+            if self.dispatcher and self.dispatcher.fsm and self.dispatcher.fsm.storage:
+                await self.dispatcher.fsm.storage.close()
+                logger.info("Dispatcher storage closed")
+        except Exception as e:
+            logger.error(f"Error closing dispatcher storage: {e}", exc_info=True)

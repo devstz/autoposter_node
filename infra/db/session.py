@@ -14,3 +14,8 @@ SessionFactory = async_sessionmaker(  # type: ignore
     class_=AsyncSession,
     expire_on_commit=False,
 )
+
+
+async def dispose_engine() -> None:
+    """Закрывает все соединения с базой данных."""
+    await engine.dispose()

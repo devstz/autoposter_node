@@ -43,11 +43,27 @@ class PostingRunner:
 
     async def start(self, stop_event: asyncio.Event) -> None:
         while True:
-            await sleep(self.sleep_interval)
-            await self.run_once()
+            try:
+                await sleep(self.sleep_interval)
+                await self.run_once()
+            except asyncio.CancelledError:
+                logger.info("PostingRunner cancelled")
+                raise
+            except Exception as e:
+                logger.error(f"Error in PostingRunner.start loop: {type(e).__name__}: {e}", exc_info=True)
+                # Продолжаем работу даже при ошибке
 
     async def stop(self) -> None:
         self.running = False
+
+    async def close(self) -> None:
+        """Закрывает ресурсы PostingRunner."""
+        try:
+            if self.tg_bot and self.tg_bot.session:
+                await self.tg_bot.session.close()
+                logger.info("PostingRunner bot session closed")
+        except Exception as e:
+            logger.error(f"Error closing posting runner bot session: {e}", exc_info=True)
 
     def _is_post_ready(self, post: Post) -> bool:
         """Проверяет, готов ли пост к отправке"""
@@ -68,36 +84,40 @@ class PostingRunner:
         return True
 
     async def run_once(self) -> None:
-        async with get_uow() as uow:
-            bot = await uow.bot_repo.get_by_token(self.tg_bot.token)
-            if bot is None:
-                logger.error("Bot not found in DB for PostingRunner.")
-                return
-            
-            post_service = PostService(uow=uow)
-            posts = await post_service.list_by_bot(bot_id=bot.id, limit=bot.settings.max_posts_per_bot)
-            
-            # Фильтруем готовые к отправке посты
-            ready_posts = [post for post in posts if self._is_post_ready(post)]
-            
-            if not ready_posts:
-                return
-            
-            # Отправляем посты с лимитом из настроек
-            MAX_POSTS_PER_SECOND = self.settings.MAX_POSTS_PER_SECOND
-            DELAY_BETWEEN_POSTS = 1.0 / MAX_POSTS_PER_SECOND
-            
-            logger.info(f"Sending {len(ready_posts)} posts with rate limit {MAX_POSTS_PER_SECOND} posts/sec")
-            
-            # Отправляем посты последовательно с задержкой для соблюдения лимита
-            for i, post in enumerate(ready_posts):
-                # Перед отправкой заново проверяем готовность (могла измениться)
-                if self._is_post_ready(post):
-                    await self._process_post(bot, post, post_service)
+        try:
+            async with get_uow() as uow:
+                bot = await uow.bot_repo.get_by_token(self.tg_bot.token)
+                if bot is None:
+                    logger.error("Bot not found in DB for PostingRunner.")
+                    return
                 
-                # Задержка после всех постов кроме последнего
-                if i < len(ready_posts) - 1:
-                    await sleep(DELAY_BETWEEN_POSTS)
+                post_service = PostService(uow=uow)
+                posts = await post_service.list_by_bot(bot_id=bot.id, limit=bot.settings.max_posts_per_bot)
+                
+                # Фильтруем готовые к отправке посты
+                ready_posts = [post for post in posts if self._is_post_ready(post)]
+                
+                if not ready_posts:
+                    return
+                
+                # Отправляем посты с лимитом из настроек
+                MAX_POSTS_PER_SECOND = self.settings.MAX_POSTS_PER_SECOND
+                DELAY_BETWEEN_POSTS = 1.0 / MAX_POSTS_PER_SECOND
+                
+                logger.info(f"Sending {len(ready_posts)} posts with rate limit {MAX_POSTS_PER_SECOND} posts/sec")
+                
+                # Отправляем посты последовательно с задержкой для соблюдения лимита
+                for i, post in enumerate(ready_posts):
+                    # Перед отправкой заново проверяем готовность (могла измениться)
+                    if self._is_post_ready(post):
+                        await self._process_post(bot, post, post_service)
+                    
+                    # Задержка после всех постов кроме последнего
+                    if i < len(ready_posts) - 1:
+                        await sleep(DELAY_BETWEEN_POSTS)
+        except Exception as e:
+            logger.error(f"Error in PostingRunner.run_once: {type(e).__name__}: {e}", exc_info=True)
+            # Не пробрасываем исключение дальше, чтобы цикл продолжался
 
     async def _process_post(self, bot: BotDB, post: Post, post_service: PostService) -> None:
         """Отправляет пост в Telegram (без проверок готовности)"""

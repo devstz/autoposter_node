@@ -40,3 +40,12 @@ class BotManager:
         logger.info(f"Webhook configured for bot {bot.id}")
 
         return True
+
+    async def close(self) -> None:
+        """Закрывает сессию бота."""
+        try:
+            if self.bot and self.bot.session:
+                await self.bot.session.close()
+                logger.info("Bot session closed")
+        except Exception as e:
+            logger.error(f"Error closing bot session: {e}", exc_info=True)

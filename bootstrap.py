@@ -10,6 +10,7 @@ from bot.builder.dispatcher_manager import DispatcherManager
 from config.app_setup import setup_application
 from config.settings import get_settings
 from services.heartbeat import _heartbeat_worker
+from infra.db.session import dispose_engine
 
 from services.posting import PostingRunner
 
@@ -66,6 +67,8 @@ async def init_app() -> None:
 
     await stop_event.wait()
 
+    logger.info("Shutting down tasks...")
+    
     polling_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await polling_task
@@ -77,6 +80,31 @@ async def init_app() -> None:
     posting_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await posting_task
+
+    logger.info("Closing resources...")
+    
+    # Закрываем ресурсы через их методы
+    try:
+        await dp_manager.close()
+    except Exception as e:
+        logger.error(f"Error closing dispatcher manager: {e}", exc_info=True)
+    
+    try:
+        await bot_manager.close()
+    except Exception as e:
+        logger.error(f"Error closing bot manager: {e}", exc_info=True)
+    
+    try:
+        await posting_runner.close()
+    except Exception as e:
+        logger.error(f"Error closing posting runner: {e}", exc_info=True)
+    
+    # Закрываем соединения с БД через функцию из session
+    try:
+        await dispose_engine()
+        logger.info("Database engine disposed")
+    except Exception as e:
+        logger.error(f"Error disposing database engine: {e}", exc_info=True)
 
     logger.info("Application shutdown complete.")
 
