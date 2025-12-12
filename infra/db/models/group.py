@@ -21,6 +21,6 @@ class Group(Base, TimestampMixin, VersionedMixin, UUIDPkMixin, ModelHelpersMixin
     last_post_at: Mapped[Optional[DateTime]] = mapped_column(DateTime(timezone=True))
     metadata_refreshed_at: Mapped[Optional[DateTime]] = mapped_column(DateTime(timezone=True))
     assigned_bot_id: Mapped[Optional[UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("bots.id", ondelete="SET NULL"), index=True)
-    assigned_bot: Mapped["Bot"] = relationship("Bot", lazy="joined")
+    assigned_bot: Mapped["Bot"] = relationship("Bot", lazy="select")
 
 from .bot import Bot  # noqa: E402
