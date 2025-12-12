@@ -10,7 +10,7 @@ from sqlalchemy import and_, func, update, case, cast, String
 from sqlalchemy import delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, noload
 
 from infra.db.models import Post, PostStatus, Group
 
@@ -498,8 +498,11 @@ class SQLAlchemyPostRepository:
         """List all posts in a distribution by name."""
         start_time = time.perf_counter()
         # group и bot уже загружаются через lazy="joined" в модели
-        # post_attempts не загружаются (lazy="select"), что ускоряет запрос
-        stmt = select(Post)
+        # post_attempts исключаем из загрузки через noload для ускорения запроса
+        stmt = (
+            select(Post)
+            .options(noload(Post.post_attempts))
+        )
         if distribution_name is None:
             stmt = stmt.where(Post.distribution_name.is_(None))
         else:

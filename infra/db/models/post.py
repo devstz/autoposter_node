@@ -41,7 +41,7 @@ class Post(Base, TimestampMixin, VersionedMixin, UUIDPkMixin, ModelHelpersMixin)
 
     group: Mapped['Group'] = relationship("Group", lazy="joined")
     bot: Mapped['Bot'] = relationship("Bot", lazy="joined")
-    post_attempts: Mapped[list['PostAttempt']] = relationship("PostAttempt", lazy="select")
+    post_attempts: Mapped[list['PostAttempt']] = relationship("PostAttempt", lazy="joined")
 
     __table_args__ = (
         # Only one active/paused/error post per group (allow history via DONE)
