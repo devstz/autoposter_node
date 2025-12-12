@@ -8,6 +8,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy import update
 
 from infra.db.models import Group
 
@@ -159,14 +160,24 @@ class SQLAlchemyGroupRepository:
         username: str | None = None,
         refreshed_at: datetime | None = None,
     ) -> Optional[Group]:
-        group = await self.get(group_id)
-        if group is None:
-            return None
+        # Используем прямой UPDATE statement для избежания проблем с optimistic locking
+        # Это более эффективно и безопасно при параллельных обновлениях
+        update_values = {}
         if title is not None and title:
-            group.title = title
+            update_values["title"] = title
         if username is not None and username:
-            group.username = username
+            update_values["username"] = username
         if refreshed_at is not None:
-            group.metadata_refreshed_at = refreshed_at
+            update_values["metadata_refreshed_at"] = refreshed_at
+        
+        if not update_values:
+            # Если нечего обновлять, просто возвращаем группу
+            return await self.get(group_id)
+        
+        # Выполняем прямой UPDATE - это избегает StaleDataError из-за optimistic locking
+        stmt = update(Group).where(Group.id == group_id).values(**update_values)
+        await self.__session.execute(stmt)
         await self.__session.flush()
-        return group
+        
+        # Перезагружаем обновленную запись
+        return await self.get(group_id)
