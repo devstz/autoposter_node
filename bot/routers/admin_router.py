@@ -11,6 +11,7 @@ from aiogram.enums.chat_type import ChatType
 from aiogram.filters import CommandStart, Command
 from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
+from aiogram.exceptions import TelegramBadRequest
 
 from bot.middlewares.admin import connect_admin_middlewares
 from bot.routers.base import BaseRouter
@@ -1671,7 +1672,25 @@ class AdminRouter(BaseRouter):
             card_page=card_page,
             anchor_post_id=view.anchor_post_id,
         )
-        await edit_message(event, view.text, reply_markup=keyboard)
+        
+        try:
+            await edit_message(event, view.text, reply_markup=keyboard)
+        except TelegramBadRequest as e:
+            error_message = str(e).lower()
+            if "query is too old" in error_message or "query id is invalid" in error_message:
+                # Удаляем старое сообщение и отправляем новое
+                from contextlib import suppress
+                with suppress(Exception):
+                    if isinstance(event, CallbackQuery) and event.message:
+                        await event.message.delete()
+                # Отправляем новое сообщение
+                if isinstance(event, CallbackQuery):
+                    await event.message.answer(view.text, reply_markup=keyboard)
+                else:
+                    await event.answer(view.text, reply_markup=keyboard)
+            else:
+                # Пробрасываем другие ошибки
+                raise
 
     async def _prepare_bindings_pool(
         self,
