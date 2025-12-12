@@ -497,10 +497,9 @@ class SQLAlchemyPostRepository:
     ) -> list[Post]:
         """List all posts in a distribution by name."""
         start_time = time.perf_counter()
-        stmt = (
-            select(Post)
-            .options(selectinload(Post.group), selectinload(Post.bot))
-        )
+        # group и bot уже загружаются через lazy="joined" в модели
+        # post_attempts не загружаются (lazy="select"), что ускоряет запрос
+        stmt = select(Post)
         if distribution_name is None:
             stmt = stmt.where(Post.distribution_name.is_(None))
         else:
