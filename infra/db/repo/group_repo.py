@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from logging import getLogger
 from datetime import datetime
 from dataclasses import dataclass
@@ -83,6 +84,7 @@ class SQLAlchemyGroupRepository:
         return list(res.scalars().all())
 
     async def list_bound(self, *, limit: int = 1000, offset: int = 0) -> list[Group]:
+        start_time = time.perf_counter()
         stmt = (
             select(Group)
             .where(Group.assigned_bot_id.is_not(None))
@@ -91,7 +93,16 @@ class SQLAlchemyGroupRepository:
             .offset(offset)
         )
         res = await self.__session.execute(stmt)
-        return list(res.scalars().all())
+        groups = list(res.scalars().all())
+        elapsed = time.perf_counter() - start_time
+        logger.info(
+            "list_bound: fetched %d groups (limit=%d, offset=%d) in %.3f seconds",
+            len(groups),
+            limit,
+            offset,
+            elapsed,
+        )
+        return groups
 
     async def count_bound(self) -> int:
         from sqlalchemy import func

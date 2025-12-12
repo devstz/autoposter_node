@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import math
+import time
+from logging import getLogger
 from typing import Dict, Optional
 from uuid import UUID
 
 from common.dto import DistributionGroupListItemDTO, DistributionGroupsViewDTO, PostDTO, GroupDTO
 from services import PostService, SettingsService, GroupService, BotService
+
+logger = getLogger(__name__)
 
 
 class ShowDistributionGroupsUseCase:
@@ -29,6 +33,7 @@ class ShowDistributionGroupsUseCase:
         self._status_short_texts = status_short_texts
 
     async def __call__(self, distribution_id: UUID, page: int = 1) -> DistributionGroupsViewDTO:
+        start_time = time.perf_counter()
         summary = await self._post_service.get_distribution_summary(distribution_id)
         if summary is None:
             raise ValueError("Distribution not found")
@@ -37,9 +42,17 @@ class ShowDistributionGroupsUseCase:
         if settings is None:
             raise RuntimeError("Settings profile is not configured")
 
+        posts_start = time.perf_counter()
         posts = await self._post_service.list_distribution_posts(
             distribution_name=summary.get("distribution_name"),
         )
+        posts_elapsed = time.perf_counter() - posts_start
+        logger.info(
+            "show_distribution_groups: list_distribution_posts took %.3f seconds, fetched %d posts",
+            posts_elapsed,
+            len(posts),
+        )
+        
         await self._ensure_groups_metadata(posts)
 
         total = len(posts)
@@ -85,6 +98,15 @@ class ShowDistributionGroupsUseCase:
 
         text = "\n".join(line for line in header_lines if line)
 
+        total_elapsed = time.perf_counter() - start_time
+        logger.info(
+            "show_distribution_groups: total execution time %.3f seconds (distribution_id=%s, page=%d, items=%d)",
+            total_elapsed,
+            distribution_id,
+            page,
+            len(items),
+        )
+
         return DistributionGroupsViewDTO(
             text=text,
             items=items,
@@ -128,16 +150,28 @@ class ShowDistributionGroupsUseCase:
         return template.format(value=value)
 
     async def _ensure_groups_metadata(self, posts: list[PostDTO]) -> None:
+        start_time = time.perf_counter()
         group_ids = {post.group_id for post in posts if post.group_id}
         if not group_ids:
             return
+        
         groups: dict[UUID, GroupDTO] = {}
+        load_start = time.perf_counter()
         for group_id in group_ids:
             group = await self._group_service.get(group_id)
             if group is None:
                 continue
             group = await self._group_service.ensure_metadata(group, self._bot_service)
             groups[group_id] = group
+        
+        load_elapsed = time.perf_counter() - load_start
+        logger.info(
+            "_ensure_groups_metadata: loaded %d groups from %d unique group_ids in %.3f seconds",
+            len(groups),
+            len(group_ids),
+            load_elapsed,
+        )
+        
         for post in posts:
             if not post.group_id:
                 continue
@@ -150,6 +184,13 @@ class ShowDistributionGroupsUseCase:
                 post.group_username = group.username
             if group.tg_chat_id and not post.group_chat_id:
                 post.group_chat_id = group.tg_chat_id
+        
+        total_elapsed = time.perf_counter() - start_time
+        logger.info(
+            "_ensure_groups_metadata: total time for %d posts: %.3f seconds",
+            len(posts),
+            total_elapsed,
+        )
 
     def _resolve_group_title(self, post: PostDTO) -> str:
         if post.group_title:

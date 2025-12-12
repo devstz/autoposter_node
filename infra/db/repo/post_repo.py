@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 from logging import getLogger
 from typing import Optional
@@ -495,6 +496,7 @@ class SQLAlchemyPostRepository:
         distribution_name: str | None,
     ) -> list[Post]:
         """List all posts in a distribution by name."""
+        start_time = time.perf_counter()
         stmt = (
             select(Post)
             .options(selectinload(Post.group), selectinload(Post.bot))
@@ -506,7 +508,15 @@ class SQLAlchemyPostRepository:
 
         stmt = stmt.order_by(Post.created_at.desc())
         res = await self.__session.execute(stmt)
-        return list(res.unique().scalars().all())
+        posts = list(res.unique().scalars().all())
+        elapsed = time.perf_counter() - start_time
+        logger.info(
+            "list_distribution_posts: fetched %d posts (distribution_name=%s) in %.3f seconds",
+            len(posts),
+            distribution_name or "None",
+            elapsed,
+        )
+        return posts
 
     async def groups_distribution_usage(self, group_ids: list[UUID]) -> dict[UUID, str]:
         if not group_ids:
