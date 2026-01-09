@@ -26,6 +26,7 @@ class BotDTO:
     latest_available_commit_hash: Optional[str]
     commits_behind: int
     last_update_check_at: Optional[datetime]
+    force_update: bool
     created_at: datetime
     updated_at: datetime
 
@@ -48,6 +49,7 @@ class BotDTO:
             latest_available_commit_hash=model.latest_available_commit_hash,
             commits_behind=model.commits_behind,
             last_update_check_at=model.last_update_check_at,
+            force_update=model.force_update,
             created_at=model.created_at,
             updated_at=model.updated_at,
         )

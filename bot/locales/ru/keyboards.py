@@ -61,6 +61,7 @@ BUTTONS: Final[dict[str, dict[str, str]]] = {
         "free_posts": "🧹 Освободить от постов",
         "delete": "🗑 Удалить бота",
         "distribution_preview": "🧮 Автораспределение",
+        "sync_all": "🔄 Синхронизировать всех",
     },
     "confirm": {
         "yes": "✅ Да",

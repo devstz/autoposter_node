@@ -89,12 +89,16 @@ class ShowBotsListUseCase:
             text_lines.append(self._pagination_texts["label"].format(current=page, total=total_pages))
             text = "\n".join(text_lines)
 
+        # Check if there are bots needing update
+        has_bots_needing_update = await self._bot_service.count_bots_needing_update() > 0
+
         return BotsListViewDTO(
             text=text,
             items=items,
             page=page,
             total_pages=total_pages,
             total_items=total,
+            has_bots_needing_update=has_bots_needing_update,
         )
 
     def _detect_status(self, heartbeat, now: datetime, settings) -> str:

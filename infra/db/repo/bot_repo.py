@@ -160,3 +160,34 @@ class SQLAlchemyBotRepository:
             stmt = stmt.where(Bot.name.ilike(f"%{name_like}%"))
         res = await self.__session.execute(stmt)
         return int(res.scalar_one())
+
+    async def set_force_update_all(self) -> int:
+        """Set force_update flag to True for all active bots."""
+        result = await self.__session.execute(
+            update(Bot)
+            .where(Bot.deactivated.is_(False))
+            .values(force_update=True)
+        )
+        await self.__session.flush()
+        return result.rowcount or 0
+
+    async def clear_force_update(self, bot_id: UUID) -> None:
+        """Clear force_update flag for a specific bot."""
+        await self.__session.execute(
+            update(Bot).where(Bot.id == bot_id).values(force_update=False)
+        )
+        await self.__session.flush()
+
+    async def count_bots_needing_update(self) -> int:
+        """Count bots that need update (commits_behind > 0 OR current_commit_hash != latest_available_commit_hash)."""
+        stmt = select(func.count()).select_from(Bot).where(
+            and_(
+                Bot.deactivated.is_(False),
+                or_(
+                    Bot.commits_behind > 0,
+                    Bot.current_commit_hash != Bot.latest_available_commit_hash,
+                ),
+            )
+        )
+        res = await self.__session.execute(stmt)
+        return int(res.scalar_one())

@@ -106,6 +106,15 @@ class AdminInlineKeyboards:
                 )
             builder.row(*controls)
 
+        # Add "Sync all" button if there are bots needing update
+        if view.has_bots_needing_update:
+            builder.row(
+                InlineKeyboardButton(
+                    text=RU_BUTTONS["bots"]["sync_all"],
+                    callback_data=AdminBotsListCallback(action=AdminBotsListAction.UPDATE_ALL).pack(),
+                )
+            )
+
         builder.row(
             InlineKeyboardButton(
                 text=RU_BUTTONS["common"]["back"],

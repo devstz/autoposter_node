@@ -101,3 +101,15 @@ class BotService:
 
     async def loads_by_bot(self, bot_ids: Optional[list[UUID]] = None) -> dict[UUID, int]:
         return await self._repo.loads_by_bot(bot_ids)
+
+    async def set_force_update_all(self) -> int:
+        """Set force_update flag to True for all active bots."""
+        return await self._repo.set_force_update_all()
+
+    async def clear_force_update(self, bot_id: UUID) -> None:
+        """Clear force_update flag for a specific bot."""
+        await self._repo.clear_force_update(bot_id)
+
+    async def count_bots_needing_update(self) -> int:
+        """Count bots that need update."""
+        return await self._repo.count_bots_needing_update()

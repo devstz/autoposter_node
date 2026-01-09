@@ -9,7 +9,11 @@ from uuid import UUID
 from infra.db.uow import SQLAlchemyUnitOfWork
 from services.bot_service import BotService
 from services.settings_service import SettingsService
+from services.user_service import UserService
+from services.system_service import SystemService
+from services.notification_service import NotificationService
 from services.git_repository import GitRepositoryTracker, GitRepositoryError
+from bot.builder.instance_bot import create_bot
 from config.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -69,6 +73,73 @@ async def _heartbeat_worker(token: str, stop_event: asyncio.Event) -> None:
                                     commits_behind=status.commits_behind,
                                     last_update_check_at=status.checked_at,
                                 )
+                                
+                                # Reload bot to get updated force_update flag
+                                updated_bot = await bot_service.get(bot.id)
+                                if updated_bot is None:
+                                    logger.warning("Failed to reload bot after git status update")
+                                    continue
+                                
+                                # Check if force_update is set and version is up to date
+                                if updated_bot.force_update:
+                                    # Check if version is up to date: commits_behind == 0 AND current_commit_hash == latest_available_commit_hash
+                                    is_up_to_date = (
+                                        status.commits_behind == 0
+                                        and status.local_commit
+                                        and status.remote_commit
+                                        and status.local_commit == status.remote_commit
+                                    )
+                                    
+                                    if is_up_to_date:
+                                        logger.info(f"Force update requested for bot {updated_bot.id}, executing update command")
+                                        
+                                        # Execute update command
+                                        update_result = await asyncio.to_thread(SystemService.execute_update_command)
+                                        
+                                        if update_result.success:
+                                            # Clear force_update flag
+                                            await bot_service.clear_force_update(updated_bot.id)
+                                            logger.info(f"Update completed successfully for bot {updated_bot.id}")
+                                        else:
+                                            # Send error notification to admins
+                                            try:
+                                                user_service = UserService(uow.user_repo)
+                                                admins = await user_service.search(is_superuser=True, limit=100)
+                                                admin_ids = [admin.user_id for admin in admins]
+                                                
+                                                if admin_ids:
+                                                    notification_bot = create_bot(token)
+                                                    notification_service = NotificationService(notification_bot)
+                                                    
+                                                    # Get bot model for notification
+                                                    from infra.db.models import Bot as BotModel
+                                                    bot_model = await uow.bot_repo.get(updated_bot.id)
+                                                    
+                                                    if bot_model:
+                                                        await notification_service.notify_update_error(
+                                                            bot=bot_model,
+                                                            error_details=f"Update command failed with exit code {update_result.exit_code}",
+                                                            exit_code=update_result.exit_code,
+                                                            stdout=update_result.stdout,
+                                                            stderr=update_result.stderr,
+                                                            admin_ids=admin_ids,
+                                                        )
+                                                    
+                                                    await notification_bot.session.close()
+                                                    
+                                            except Exception as notify_error:
+                                                logger.error(f"Failed to send update error notification: {notify_error}", exc_info=True)
+                                            
+                                            logger.error(
+                                                f"Update failed for bot {updated_bot.id}: exit_code={update_result.exit_code}, "
+                                                f"stderr={update_result.stderr[:200]}"
+                                            )
+                                    else:
+                                        logger.debug(
+                                            f"Force update requested for bot {updated_bot.id}, but version is not up to date "
+                                            f"(commits_behind={status.commits_behind}, "
+                                            f"local={status.local_commit}, remote={status.remote_commit})"
+                                        )
             except Exception:
                 logger.exception("Heartbeat worker iteration failed")
 

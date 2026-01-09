@@ -16,6 +16,7 @@ class AdminBotsListAction(str, Enum):
     PAGE = "page"
     VIEW = "view"
     BACK = "back"
+    UPDATE_ALL = "update_all"
 
 
 class AdminBotAction(str, Enum):

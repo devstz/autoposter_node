@@ -4,6 +4,7 @@ import platform
 import re
 import subprocess
 import socket
+from dataclasses import dataclass
 from typing import Optional
 
 
@@ -122,3 +123,99 @@ class SystemService:
                     return ip
 
         return None
+
+    @dataclass
+    class UpdateCommandResult:
+        """Result of update command execution."""
+        success: bool
+        exit_code: int
+        stdout: str
+        stderr: str
+
+    @staticmethod
+    def execute_update_command() -> "SystemService.UpdateCommandResult":
+        """
+        Execute update command: cd /opt/autoposter_node/ && git pull && systemctl restart autoposter.service
+        
+        Returns:
+            UpdateCommandResult with execution details
+        """
+        command = "cd /opt/autoposter_node/ && git pull && systemctl restart autoposter.service"
+        
+        try:
+            result = subprocess.run(
+                command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=300,  # 5 minutes timeout
+            )
+            
+            return SystemService.UpdateCommandResult(
+                success=result.returncode == 0,
+                exit_code=result.returncode,
+                stdout=result.stdout,
+                stderr=result.stderr,
+            )
+        except subprocess.TimeoutExpired:
+            return SystemService.UpdateCommandResult(
+                success=False,
+                exit_code=-1,
+                stdout="",
+                stderr="Command execution timeout (exceeded 5 minutes)",
+            )
+        except Exception as e:
+            return SystemService.UpdateCommandResult(
+                success=False,
+                exit_code=-1,
+                stdout="",
+                stderr=f"Exception during command execution: {str(e)}",
+            )
+
+    @dataclass
+    class UpdateCommandResult:
+        """Result of update command execution."""
+        success: bool
+        exit_code: int
+        stdout: str
+        stderr: str
+
+    @staticmethod
+    def execute_update_command() -> "UpdateCommandResult":
+        """
+        Execute update command: cd /opt/autoposter_node/ && git pull && systemctl restart autoposter.service
+        
+        Returns:
+            UpdateCommandResult with execution details
+        """
+        command = "cd /opt/autoposter_node/ && git pull && systemctl restart autoposter.service"
+        
+        try:
+            result = subprocess.run(
+                command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=300,  # 5 minutes timeout
+            )
+            
+            return SystemService.UpdateCommandResult(
+                success=result.returncode == 0,
+                exit_code=result.returncode,
+                stdout=result.stdout,
+                stderr=result.stderr,
+            )
+        except subprocess.TimeoutExpired:
+            return SystemService.UpdateCommandResult(
+                success=False,
+                exit_code=-1,
+                stdout="",
+                stderr="Command execution timeout (exceeded 5 minutes)",
+            )
+        except Exception as e:
+            return SystemService.UpdateCommandResult(
+                success=False,
+                exit_code=-1,
+                stdout="",
+                stderr=f"Exception during command execution: {str(e)}",
+            )

@@ -25,6 +25,7 @@ class BotsListViewDTO:
     page: int
     total_pages: int
     total_items: int
+    has_bots_needing_update: bool = False
 
 
 @dataclass(slots=True)

@@ -35,6 +35,9 @@ class Bot(Base, TimestampMixin, VersionedMixin, UUIDPkMixin, ModelHelpersMixin):
     commits_behind: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     last_update_check_at: Mapped[Optional[DateTime]] = mapped_column(DateTime(timezone=True))
 
+    # Force update flag
+    force_update: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=expression.false())
+
     settings: Mapped['Setting'] = relationship("Setting", lazy="joined")
 
     __table_args__ = (

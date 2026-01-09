@@ -92,3 +92,52 @@ class NotificationService:
             f"Sent failure notification for group {group.id} to {len(admin_ids)} admins"
         )
 
+    async def notify_update_error(
+        self,
+        bot: BotDB,
+        error_details: str,
+        exit_code: int,
+        stdout: str,
+        stderr: str,
+        admin_ids: list[int],
+    ) -> None:
+        """
+        Отправляет уведомление админам об ошибке обновления бота
+        
+        Args:
+            bot: Модель бота
+            error_details: Детали ошибки
+            exit_code: Код возврата команды
+            stdout: Стандартный вывод команды
+            stderr: Стандартный поток ошибок
+            admin_ids: Список user_id админов
+        """
+        bot_username = bot.username or "без имени"
+        if bot_username and not bot_username.startswith("@"):
+            bot_username = f"@{bot_username}"
+        
+        message_lines = [
+            "⚠️ <b>ОШИБКА ОБНОВЛЕНИЯ БОТА</b>\n",
+            f"<b>Бот:</b> {bot_username} (<code>{bot.bot_id}</code>)",
+            f"<b>IP сервера:</b> <code>{bot.server_ip}</code>\n",
+            f"<b>Код возврата:</b> <code>{exit_code}</code>",
+        ]
+        
+        if error_details:
+            message_lines.append(f"<b>Ошибка:</b> <code>{error_details}</code>")
+        
+        if stderr:
+            stderr_preview = stderr[:500] + "..." if len(stderr) > 500 else stderr
+            message_lines.append(f"\n<b>Stderr:</b>\n<code>{stderr_preview}</code>")
+        
+        if stdout:
+            stdout_preview = stdout[:500] + "..." if len(stdout) > 500 else stdout
+            message_lines.append(f"\n<b>Stdout:</b>\n<code>{stdout_preview}</code>")
+        
+        message = "\n".join(message_lines)
+        
+        await self.notify_admins(message, admin_ids)
+        logger.info(
+            f"Sent update error notification for bot {bot.id} to {len(admin_ids)} admins"
+        )
+

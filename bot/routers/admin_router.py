@@ -92,7 +92,7 @@ class AdminRouter(BaseRouter):
         # Список ботов
         # ==========================
         @self.callback_query(AdminBotsListCallback.filter())
-        async def handle_bots_list(callback: CallbackQuery, callback_data: AdminBotsListCallback, ux: UXContext):
+        async def handle_bots_list(callback: CallbackQuery, callback_data: AdminBotsListCallback, ux: UXContext, bot_service: BotService):
             action = callback_data.action
             page = callback_data.page or 1
 
@@ -106,6 +106,15 @@ class AdminRouter(BaseRouter):
                     await callback.answer("Бот не найден", show_alert=True)
                     return
                 await self._render_bot_card(callback, ux, bot_uuid, page)
+                return
+
+            if action == AdminBotsListAction.UPDATE_ALL:
+                updated_count = await bot_service.set_force_update_all()
+                if updated_count > 0:
+                    await callback.answer(f"Флаг обновления установлен для {updated_count} бот(ов)", show_alert=True)
+                else:
+                    await callback.answer("Нет активных ботов для обновления", show_alert=True)
+                await self._render_bots_list(callback, ux, page=page)
                 return
 
             if action == AdminBotsListAction.BACK:
