@@ -3,12 +3,14 @@ from typing import Optional
 
 
 class TelegramErrorType(str, Enum):
-    """Типы критических ошибок Telegram, требующих удаления группы"""
+    """Типы ошибок Telegram"""
     CHAT_NOT_FOUND = "chat_not_found"
     BOT_KICKED = "bot_kicked"
     BOT_BLOCKED = "bot_blocked"
     FORBIDDEN = "forbidden"
     USER_DEACTIVATED = "user_deactivated"
+    NETWORK_ERROR = "network_error"
+    SERVER_ERROR = "server_error"
     UNKNOWN = "unknown"
 
 
@@ -23,6 +25,10 @@ def classify_telegram_error(exception: Exception) -> TelegramErrorType:
     - FORBIDDEN: нет доступа
     - USER_DEACTIVATED: пользователь деактивирован
     
+    Некритические ошибки (сетевые/серверные, не останавливают постинг):
+    - NETWORK_ERROR: сетевые ошибки (timeout, connection issues)
+    - SERVER_ERROR: серверные ошибки (Bad Gateway, 5xx errors)
+    
     Args:
         exception: Исключение от aiogram
         
@@ -31,6 +37,20 @@ def classify_telegram_error(exception: Exception) -> TelegramErrorType:
     """
     error_str = str(exception).lower()
     error_type_name = type(exception).__name__
+    
+    # Проверка сетевых/серверных ошибок по типу исключения
+    if error_type_name == "TelegramNetworkError":
+        return TelegramErrorType.NETWORK_ERROR
+    
+    if error_type_name == "TelegramServerError":
+        return TelegramErrorType.SERVER_ERROR
+    
+    # Проверка сетевых/серверных ошибок по тексту
+    if any(keyword in error_str for keyword in ["request timeout", "timeout error", "network error", "connection"]):
+        return TelegramErrorType.NETWORK_ERROR
+    
+    if any(keyword in error_str for keyword in ["bad gateway", "server error", "502", "503", "504", "500", "501", "505"]):
+        return TelegramErrorType.SERVER_ERROR
     
     # Проверка по типу исключения
     if error_type_name == "ChatNotFound":
@@ -58,6 +78,10 @@ def classify_telegram_error(exception: Exception) -> TelegramErrorType:
 def is_critical_error(error_type: TelegramErrorType) -> bool:
     """
     Проверяет, является ли ошибка критической (требует удаления группы)
+    
+    Критические ошибки останавливают постинг и удаляют группу.
+    Сетевые/серверные ошибки (NETWORK_ERROR, SERVER_ERROR) НЕ являются критическими
+    и обрабатываются с повторными попытками.
     
     Args:
         error_type: Тип ошибки

@@ -15,7 +15,11 @@ from services.user_service import UserService
 from services.notification_service import NotificationService
 
 from common.enums.post_status import PostStatus
-from common.enums.telegram_error import classify_telegram_error, is_critical_error
+from common.enums.telegram_error import (
+    TelegramErrorType,
+    classify_telegram_error,
+    is_critical_error,
+)
 
 from infra.db.models import Bot as BotDB, Post, PostAttempt
 from sqlalchemy.exc import IntegrityError
@@ -26,6 +30,14 @@ from asyncio import sleep
 
 from logging import getLogger
 from config.settings import get_settings
+
+# Попытка импортировать исключения aiogram для сетевых/серверных ошибок
+try:
+    from aiogram.exceptions import TelegramNetworkError, TelegramServerError
+except ImportError:
+    # Если исключения не существуют в этой версии aiogram, используем проверку по имени класса
+    TelegramNetworkError = None
+    TelegramServerError = None
 
 logger = getLogger('PostingRunner')
 
@@ -83,6 +95,14 @@ class PostingRunner:
         
         return True
 
+    def _is_network_or_server_error(self, exception: Exception) -> bool:
+        """Проверяет, является ли ошибка сетевой или серверной (некритической)"""
+        error_type = classify_telegram_error(exception)
+        return error_type in {
+            TelegramErrorType.NETWORK_ERROR,
+            TelegramErrorType.SERVER_ERROR,
+        }
+
     async def run_once(self) -> None:
         try:
             async with get_uow() as uow:
@@ -121,6 +141,10 @@ class PostingRunner:
 
     async def _process_post(self, bot: BotDB, post: Post, post_service: PostService) -> None:
         """Отправляет пост в Telegram (без проверок готовности)"""
+        # Константы для повторных попыток
+        MAX_IMMEDIATE_RETRIES = 3
+        RETRY_DELAY = 2.0  # секунды между попытками
+        
         try:
             # Удаляем предыдущую попытку, если требуется
             if post.delete_last_attempt and post.post_attempts:
@@ -135,8 +159,44 @@ class PostingRunner:
                     if result_deleted:
                         last_post_attempt.deleted = True
 
-            # Отправляем пост
-            tg_msg = await self.posting_service.send_post(post)
+            # Отправляем пост с повторными попытками для сетевых/серверных ошибок
+            tg_msg = None
+            last_error = None
+            
+            for retry_attempt in range(MAX_IMMEDIATE_RETRIES):
+                try:
+                    tg_msg = await self.posting_service.send_post(post)
+                    # Успешная отправка - выходим из цикла повторных попыток
+                    break
+                except Exception as e:
+                    last_error = e
+                    # Проверяем, является ли это сетевой/серверной ошибкой
+                    if self._is_network_or_server_error(e):
+                        if retry_attempt < MAX_IMMEDIATE_RETRIES - 1:
+                            # Еще есть попытки - логируем и повторяем
+                            logger.warning(
+                                f"Network/server error sending post {post.id} (attempt {retry_attempt + 1}/{MAX_IMMEDIATE_RETRIES}): "
+                                f"{type(e).__name__}: {e}. Retrying in {RETRY_DELAY} seconds..."
+                            )
+                            await sleep(RETRY_DELAY)
+                            continue
+                        else:
+                            # Все попытки исчерпаны - пропускаем пост без записи ошибки
+                            logger.warning(
+                                f"Skipping post {post.id} after {MAX_IMMEDIATE_RETRIES} retries due to network/server error: "
+                                f"{type(e).__name__}: {e}. Post will be retried in next cycle."
+                            )
+                            return  # Пропускаем пост, он останется активным для следующего цикла
+                    else:
+                        # Это не сетевая/серверная ошибка - пробрасываем дальше для обычной обработки
+                        raise
+            
+            # Если tg_msg все еще None, значит все попытки неудачны, но это не должно произойти
+            # (мы уже вернулись выше), но на всякий случай проверяем
+            if tg_msg is None:
+                if last_error:
+                    raise last_error
+                raise ValueError(f"Failed to send post {post.id} for unknown reason")
 
             # Записываем успешную попытку в БД
             try:
