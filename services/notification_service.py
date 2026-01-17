@@ -140,4 +140,3 @@ class NotificationService:
         logger.info(
             f"Sent update error notification for bot {bot.id} to {len(admin_ids)} admins"
         )
-

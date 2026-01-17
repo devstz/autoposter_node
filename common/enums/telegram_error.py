@@ -5,6 +5,7 @@ from typing import Optional
 class TelegramErrorType(str, Enum):
     """Типы ошибок Telegram"""
     CHAT_NOT_FOUND = "chat_not_found"
+    CHAT_RESTRICTED = "chat_restricted"
     BOT_KICKED = "bot_kicked"
     BOT_BLOCKED = "bot_blocked"
     FORBIDDEN = "forbidden"
@@ -20,6 +21,7 @@ def classify_telegram_error(exception: Exception) -> TelegramErrorType:
     
     Критические ошибки (требуют удаления группы):
     - CHAT_NOT_FOUND: чат удален
+    - CHAT_RESTRICTED: чат ограничен/заблокирован
     - BOT_KICKED: бот кикнут из группы
     - BOT_BLOCKED: бот заблокирован
     - FORBIDDEN: нет доступа
@@ -60,6 +62,9 @@ def classify_telegram_error(exception: Exception) -> TelegramErrorType:
     if "chat not found" in error_str:
         return TelegramErrorType.CHAT_NOT_FOUND
     
+    if "chat_restricted" in error_str or "chat restricted" in error_str:
+        return TelegramErrorType.CHAT_RESTRICTED
+    
     if "bot was kicked" in error_str:
         return TelegramErrorType.BOT_KICKED
     
@@ -91,6 +96,7 @@ def is_critical_error(error_type: TelegramErrorType) -> bool:
     """
     return error_type in {
         TelegramErrorType.CHAT_NOT_FOUND,
+        TelegramErrorType.CHAT_RESTRICTED,
         TelegramErrorType.BOT_KICKED,
         TelegramErrorType.BOT_BLOCKED,
         TelegramErrorType.FORBIDDEN,
