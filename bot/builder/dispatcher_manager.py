@@ -44,15 +44,20 @@ class DispatcherManager:
     async def _setup_default_commands(self):
         bot = self.bot_manager.get_bot()
         if bot:
-            for lang in ["en", "ru"]:
-                await bot.set_my_commands([
-                    BotCommand(command='start', description=("Start the bot" if lang == "en" else "Запустить бота")),
-                    BotCommand(command='help', description="Get help information" if lang == "en" else "Получить справку"),
-                ], scope=BotCommandScopeAllPrivateChats(), language_code=lang)
-                await bot.set_my_commands([
-                    BotCommand(command='start', description='Information about the current group' if lang == "en" else 'Информация о текущей группе'),
-                ], scope=BotCommandScopeAllGroupChats(), language_code=lang)
-            logger.info("Default commands set up successfully")
+            try:
+                for lang in ["en", "ru"]:
+                    await bot.set_my_commands([
+                        BotCommand(command='start', description=("Start the bot" if lang == "en" else "Запустить бота")),
+                        BotCommand(command='help', description="Get help information" if lang == "en" else "Получить справку"),
+                    ], scope=BotCommandScopeAllPrivateChats(), language_code=lang)
+                    await bot.set_my_commands([
+                        BotCommand(command='start', description='Information about the current group' if lang == "en" else 'Информация о текущей группе'),
+                    ], scope=BotCommandScopeAllGroupChats(), language_code=lang)
+                logger.info("Default commands set up successfully")
+            except Exception as e:
+                # Log error but don't crash the application
+                # This can happen due to rate limits (TelegramRetryAfter) or other Telegram API issues
+                logger.warning(f"Failed to set default commands: {type(e).__name__}: {e}")
         else:
             logger.warning("Bot instance is not available, cannot set default commands")
 
