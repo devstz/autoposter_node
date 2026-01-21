@@ -103,12 +103,15 @@ async def _heartbeat_worker(token: str, stop_event: asyncio.Event) -> None:
                                             f"executing update command (includes git pull)"
                                         )
                                     
+                                    # Clear force_update flag BEFORE executing update command
+                                    # This prevents infinite restart loop since the command restarts the service
+                                    await bot_service.clear_force_update(updated_bot.id)
+                                    logger.info(f"Cleared force_update flag for bot {updated_bot.id}")
+                                    
                                     # Execute update command (includes git pull + restart)
                                     update_result = await asyncio.to_thread(SystemService.execute_update_command)
                                     
                                     if update_result.success:
-                                        # Clear force_update flag
-                                        await bot_service.clear_force_update(updated_bot.id)
                                         logger.info(f"Update completed successfully for bot {updated_bot.id}")
                                     else:
                                         # Send error notification to admins
