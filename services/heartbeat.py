@@ -15,6 +15,7 @@ from services.notification_service import NotificationService
 from services.git_repository import GitRepositoryTracker, GitRepositoryError
 from bot.builder.instance_bot import create_bot
 from config.settings import get_settings
+from common.usecases import BotInitializationUseCase
 
 logger = logging.getLogger(__name__)
 
@@ -48,8 +49,42 @@ async def _heartbeat_worker(token: str, stop_event: asyncio.Event) -> None:
 
                     bot = await bot_service.get_by_token(token)
                     if bot is None:
-                        logger.warning("Heartbeat worker: bot with configured token not found")
-                    else:
+                        logger.warning("Heartbeat worker: bot with configured token not found, attempting to create bot")
+                        try:
+                            # Создаем Bot через aiogram для получения информации
+                            tg_bot = create_bot(token)
+                            me = await tg_bot.get_me()
+                            
+                            # Создаем сервисы для use case
+                            system_service = SystemService()
+                            usecase = BotInitializationUseCase(
+                                bot_service=bot_service,
+                                settings_service=settings_service,
+                                system_service=system_service,
+                            )
+                            
+                            # Создаем бота через use case
+                            result = await usecase(
+                                bot_id=me.id,
+                                token=token,
+                                username=me.username,
+                                full_name=getattr(me, "full_name", None),
+                            )
+                            
+                            # Закрываем сессию бота
+                            await tg_bot.session.close()
+                            
+                            # Получаем созданного бота
+                            bot = await bot_service.get_by_token(token)
+                            if bot:
+                                logger.info(f"Bot successfully created in database: bot_id={bot.id}, username={me.username}")
+                            else:
+                                logger.error("Bot was created but could not be retrieved from database")
+                        except Exception as e:
+                            logger.error(f"Failed to create bot in heartbeat worker: {e}", exc_info=True)
+                    
+                    # Если бот существует (был найден или только что создан), продолжаем обработку
+                    if bot is not None:
                         last_bot_id = bot.id
                         await bot_service.update_heartbeat(bot.id)
 
